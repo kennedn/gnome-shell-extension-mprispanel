@@ -8,21 +8,18 @@ const GLib = imports.gi.GLib;
 // proxy is just an instance of spotify_proxy
 // changed_properties is a GLib.Variant packed json object with a list of changed properties (usually all of them)
 // theres probably a better way of firing for a specific property that we care about
-// but i couldn't figure it out or find any docs.
+// but i couldn't figure it out or find any examples.
 function on_prop_change(proxy, changed_properties, invalidated_properties) {
-    // Check that we got a value for our dbus query (spotify is running), enable and disable the extension accordingly
+    
+    // Check that we get a value for our dbus query (spotify is running), hide/unhide the extension accordingly
     let temp_status = spotify_proxy.PlaybackStatus;
     if (typeof(temp_status) !== 'string') { 
-      disable(); 
-    } else if(!enabled) {
-      enable();
+      hide(); 
+    } 
+    else if(!enabled) {
+      unhide();
     }
    
-    // If we get bumped somewhere between other icons in the notification panel, get us added to the index again
-    // E.g stay to the left in the panel. 
-    if (Main.panel._rightBox.get_child_at_index(0) != container) { disable(); enable(); }
-
-
     // Change play button icon based on spotify player state
     if (local_status != temp_status) {
       if (temp_status == "Paused"){
@@ -55,10 +52,11 @@ function change_buttons_icon(button_index, change_icon_name) {
 This the a definition for a Dbus Proxy interface
 From my understanding of it, it creates a minimalised mapping between items defined in the proxy xml and a larger bus (session bus in our case)
 Benifits of this are you get by with actively monitoring a sliver of a bus rather than polling the entire larger bus for changes 
-
 In this case we are creating a mapping for useful mpris methods/properties which are executed/maintained by the spotify client.
-
 With these methods we can do some useful stuff, like know what state spotify is in, play, pause, next, previous, download cover art etc. 
+
+Use the introspect dbus endpoint to get a full xml output, then you can cherry pick, e.g:
+dbus-send --session --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.freedesktop.DBus.Introspectable.Introspec
 */
 const spotify_dbus_xml = `<node>
 <interface name="org.mpris.MediaPlayer2.Player"> 
@@ -92,7 +90,7 @@ function init() {
     icons.push(new St.Icon({icon_name: 'media-skip-start-symbolic',    style_class: 'system-status-icon' }));
     icons.push(new St.Icon({icon_name: 'media-skip-backward-symbolic', style_class: 'system-status-icon' }));
   
-    // Push our anon callback functions into array, Function name corresponds to the method name on the bus + Sync.
+    // Push our anon callback functions into array, Function name corresponds to the method name on the dbus + Sync.
     // Back to front for the same reason as the icons
     dbus_callbacks.push(function() { spotify_proxy.NextSync(); }); 
     dbus_callbacks.push(function() { spotify_proxy.PlayPauseSync(); }); 
@@ -104,27 +102,25 @@ function init() {
                           can_focus: true,
                           track_hover: true,
                           vertical: false });
-
-    // For loop to cut down on repitition, achieved the following;
-    // - Create our button object
-    // - Append the Icon we created earlier as a child of the button
-    // - Child each button to the container
-    // - Connect our dbus callback functions up to each buttons press event
+    // for each button 
     for (i = 0; i < 3; i++) {
+      // Create button object and push to array
       buttons.push(new St.Bin({ style_class: 'panel-button',
                           reactive: true,
                           can_focus: true,
                           track_hover: true,
                           x_fill: true,
                           y_fill: false }));
+      // give our button an icon
       buttons[i].set_child(icons[i]);
-      
+      // Insert the button into our containers child array 
       container.insert_child_at_index(buttons[i], 0);
+      // Makes our dbus_callback exec when the button is pressed
       buttons[i].connect('button-press-event', dbus_callbacks[i]);
     }
-
+ 
     // Connect the g-properties-changed event to our callback
-    // This fires everytime a property gets changed in our proxies scope (refer to xml). 
+    // This fires everytime a property gets changed in our proxies scope (refer to spotfiy_dbus_xml). 
     spotify_proxy.connect("g-properties-changed", on_prop_change);
 
     // call on_prop_change callback once to get the correct button state
@@ -133,17 +129,30 @@ function init() {
   
 }
 
-//Insert into panel notification area if spotify is running
-function enable() {
- 
+//Re-insert our buttons back into the container, unhides the buttons on the panel.
+function unhide() {
     if (is_started()) {
-      Main.panel._rightBox.insert_child_at_index(container, 0);
+      for (i = 0; i < buttons.length; i++) {
+        container.insert_child_at_index(buttons[i], 0);
+      }
       enabled = true;
     }
 }
 
+//Remove our controls from the container, this hides the buttons on the panel.
+function hide() {
+  container.remove_all_children();
+  enabled = false;
+}
+
+//Insert into panel notification area if spotify is running
+// Do not call in script, used by tweaks to enable the extension.
+function enable() {
+    Main.panel._centerBox.insert_child_at_index(container, 0);
+}
+
 //Remove from panel notification area
+// Do not call in script, used by tweaks to disable the extension.
 function disable() {
-    Main.panel._rightBox.remove_child(container);
-    enabled = false;
+    Main.panel._centerBox.remove_child(container);
 }
