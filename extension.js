@@ -32,7 +32,7 @@ class MPRISWidget {
         this.disabled = true;
         this.removed = false;
         this.playbackStatus = false;
-        this.propsHandle = null;
+        this.connections = [];
         this.buttons = {};
         this.buttons.start = this._createButton(new St.Icon({icon_name: 'media-playback-start-symbolic', style_class: 'system-status-icon' }));
         this.buttons.pause = this._createButton(new St.Icon({icon_name: 'media-playback-pause-symbolic', style_class: 'system-status-icon' }));
@@ -81,17 +81,20 @@ class MPRISWidget {
                 '/org/mpris/MediaPlayer2'
             );
             // Attach callbacks for each button and to watch for property changes on the mpris interface
-            this.buttons.start.connect('button-press-event', this._bind(() => {this.proxy.PlayRemote();}));
-            this.buttons.pause.connect('button-press-event', this._bind(() => {this.proxy.PauseSync();}));
-            this.buttons.forward.connect('button-press-event', this._bind(() => {this.proxy.NextSync();}));
-            this.buttons.backward.connect('button-press-event', this._bind(() => {this.proxy.PreviousSync();}));
-            // Capture connection handle for later disconnection if we disable extension in tweaks
-            this.propsHandle = this.proxy.connect("g-properties-changed", this._bind(this.on_prop_change));
-            // Run callback once to update buttons to their correct initial state
+            this._connect(this.buttons.start, 'button-press-event', this._bind(() => {this.proxy.PlayRemote();}));
+            this._connect(this.buttons.pause, 'button-press-event', this._bind(() => {this.proxy.PauseRemote();}));
+            this._connect(this.buttons.forward, 'button-press-event', this._bind(() => {this.proxy.NextRemote();}));
+            this._connect(this.buttons.backward, 'button-press-event', this._bind(() => {this.proxy.PreviousRemote();}));
+            this._connect(this.proxy, 'g-properties-changed', this._bind(this.on_prop_change));
             GLib.timeout_add(0, 300, this._bind(this.on_prop_change));
         } catch (e) {
             logError(e);
         }
+    }
+
+    _connect(object, property, callback) {
+        let handler = object.connect(property, callback);
+        this.connections.push({"object": object, "handler": handler});
     }
 
     // Both Dbus & the MPRIS interface are active if CanPlay returns true
@@ -146,15 +149,19 @@ class MPRISWidget {
 
     // Remove container from panel
     disable() {
-        Main.panel._rightBox.remove_child(this.buttonContainer);
-        this.disabled = true;
+        if (!this.removed) {
+            Main.panel._rightBox.remove_child(this.buttonContainer);
+            this.disabled = true;
+        }   
     }
 
     // Run disable and additionally destroy the container and disconnect the on_props_changed event
     remove() {
-        this.disable();
-        this.buttonContainer.destroy();
-        this.proxy.disconnect(this.propsHandle);
-        this.removed = true;
+        if (!this.removed) {
+            this.disable();
+            this.buttonContainer.destroy_all_children();
+            this.buttonContainer.destroy();
+            this.removed = true;
+        }
     }
 }
