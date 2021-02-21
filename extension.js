@@ -61,13 +61,16 @@ class MPRISWidget {
                           track_hover: true,
                           x_fill: true,
                           y_fill: false });
+        
         button.set_child(icon);
-
+        
         return button;
     }
+
     _bind(func) {
         return Lang.bind(this, func);
     }
+
     _dbusProxyConnect() {
         let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.introspect);
         // Try and create a dbus proxy object then create callback connections for the buttons
@@ -85,31 +88,19 @@ class MPRISWidget {
             // Capture connection handle for later disconnection if we disable extension in tweaks
             this.propsHandle = this.proxy.connect("g-properties-changed", this._bind(this.on_prop_change));
             // Run callback once to update buttons to their correct initial state
-            this.on_prop_change();
+            GLib.timeout_add(0, 300, this._bind(this.on_prop_change));
         } catch (e) {
             logError(e);
         }
     }
-    // get _mprisObjects() {
-    //  let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.dbusIntrospect);
-    //  let dbus_proxy;
-    //  // If creating a proxy synchronously, you catch errors normally
-    //  try {
-    //      dbus_proxy = new dbusWrapper(
-    //          Gio.DBus.session,
-    //          'org.freedesktop.DBus',
-    //          '/org/freedesktop/DBus'
-    //      );
-    //  } catch (e) {
-    //      logError(e);
-    //  }
-    //  return dbus_proxy.ListNamesSync()[0].filter(v => v.includes("org.mpris.MediaPlayer2"));
-    // }
 
     // Both Dbus & the MPRIS interface are active if CanPlay returns true
     get is_running() {
-        let canPlay = this.proxy.CanPlay;
-        return ( this.proxy !== null && typeof canPlay === "boolean" && canPlay === true );
+        if (this.proxy !== null) {
+            let canPlay = this.proxy.CanPlay;
+            return ( typeof canPlay === "boolean" && canPlay === true );
+        }
+        return false;
     }
 
     // Callback when properties change on the MPRIS interface
@@ -138,19 +129,24 @@ class MPRISWidget {
             }
         }
 
+        // Restore to left most index in rightBox if container has been moved
+        if (!this.disabled && Main.panel._rightBox.get_children()[0] != this.buttonContainer) {
+            this.disable();
+            this.enable();
+        }
     }
 
     // Insert container onto panel
     enable() {
         if (this.is_running && !this.removed) {
-            Main.panel._centerBox.insert_child_at_index(this.buttonContainer, 0);
+            Main.panel._rightBox.insert_child_at_index(this.buttonContainer, 0);
             this.disabled = false;
         }
     }
 
     // Remove container from panel
     disable() {
-        Main.panel._centerBox.remove_child(this.buttonContainer);
+        Main.panel._rightBox.remove_child(this.buttonContainer);
         this.disabled = true;
     }
 
