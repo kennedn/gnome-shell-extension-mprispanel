@@ -141,7 +141,7 @@ class MPRISWidget {
 
     // Insert container onto panel
     enable() {
-        if (this.is_running && !this.removed) {
+        if (this.is_running && !this.removed && this.disabled) {
             Main.panel._rightBox.insert_child_at_index(this.buttonContainer, 0);
             this.disabled = false;
         }
@@ -149,7 +149,7 @@ class MPRISWidget {
 
     // Remove container from panel
     disable() {
-        if (!this.removed) {
+        if (!this.removed && !this.disabled) {
             Main.panel._rightBox.remove_child(this.buttonContainer);
             this.disabled = true;
         }   
@@ -159,8 +159,12 @@ class MPRISWidget {
     remove() {
         if (!this.removed) {
             this.disable();
+            // Disconnect all signals
+            this.connections.forEach((c) => c.object.disconnect(c.handler));
+            // Destroy children and container
             this.buttonContainer.destroy_all_children();
             this.buttonContainer.destroy();
+            // Mark class instance as removed
             this.removed = true;
         }
     }
