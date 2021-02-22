@@ -24,45 +24,40 @@ function disable() {
     widget = null;
 }
 
+const widgetState = Object.freeze({
+    ENABLED: 1,
+    DISABLED: 2,
+    REMOVED: 3,
+});
 class MPRISWidget {
+
     constructor(busName, introspect) {
         this.busName = busName;
         this.introspect = introspect;
         this.proxy = null;
-        this.disabled = true;
-        this.removed = false;
-        this.playbackStatus = false;
+        this.playbackStatus = null;
+        this.state = widgetState.ENABLED;
         this.connections = [];
+
+        this.buttonContainer = new St.BoxLayout({ style_class: 'panel-status-menu-box', reactive: true,
+                                                  can_focus: true, track_hover: true, vertical: false });
         this.buttons = {};
-        this.buttons.start = this._createButton(new St.Icon({icon_name: 'media-playback-start-symbolic', style_class: 'system-status-icon' }));
-        this.buttons.pause = this._createButton(new St.Icon({icon_name: 'media-playback-pause-symbolic', style_class: 'system-status-icon' }));
-        this.buttons.forward = this._createButton(new St.Icon({icon_name: 'media-skip-forward-symbolic', style_class: 'system-status-icon' }));
-        this.buttons.backward = this._createButton(new St.Icon({icon_name: 'media-skip-backward-symbolic', style_class: 'system-status-icon' }));
+        this.buttons.forward = this._createButton('media-skip-forward-symbolic', this.buttonContainer);
+        this.buttons.start = this._createButton('media-playback-start-symbolic', this.buttonContainer);
+        this.buttons.pause = this._createButton('media-playback-pause-symbolic', this.buttonContainer);
+        this.buttons.backward = this._createButton('media-skip-backward-symbolic', this.buttonContainer);
 
-        this.buttonContainer = new St.BoxLayout({ style_class: 'panel-status-menu-box',
-                                                  reactive: true,
-                                                  can_focus: true,
-                                                  track_hover: true,
-                                                  vertical: false });
-
-        this.buttonContainer.insert_child_at_index(this.buttons.forward, 0);
-        this.buttonContainer.insert_child_at_index(this.buttons.start, 0);
-        this.buttonContainer.insert_child_at_index(this.buttons.pause, 0);
-        this.buttonContainer.insert_child_at_index(this.buttons.backward, 0);
         this.buttons.pause.hide();
 
         this._dbusProxyConnect();
-
     }
-    _createButton(icon) {
-        let button = new St.Bin({ style_class: 'panel-button',
-                          reactive: true,
-                          can_focus: true,
-                          track_hover: true,
-                          x_fill: true,
-                          y_fill: false });
-        
+    _createButton(iconName, container) {
+        let icon = new St.Icon({icon_name: iconName, style_class: 'system-status-icon'});
+        let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, 
+                                  track_hover: true, x_fill: true, y_fill: false });
         button.set_child(icon);
+
+        container.insert_child_at_index(button, 0);
         
         return button;
     }
@@ -81,12 +76,13 @@ class MPRISWidget {
                 '/org/mpris/MediaPlayer2'
             );
             // Attach callbacks for each button and to watch for property changes on the mpris interface
-            this._connect(this.buttons.start, 'button-press-event', this._bind(() => {this.proxy.PlayRemote();}));
-            this._connect(this.buttons.pause, 'button-press-event', this._bind(() => {this.proxy.PauseRemote();}));
-            this._connect(this.buttons.forward, 'button-press-event', this._bind(() => {this.proxy.NextRemote();}));
-            this._connect(this.buttons.backward, 'button-press-event', this._bind(() => {this.proxy.PreviousRemote();}));
-            this._connect(this.proxy, 'g-properties-changed', this._bind(this.on_prop_change));
-            GLib.timeout_add(0, 300, this._bind(this.on_prop_change));
+            this._connect(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
+            this._connect(this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
+            this._connect(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
+            this._connect(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
+            this._connect(this.proxy, 'g-properties-changed', this._bind(this._onPropertyChange));
+            // Call on_prop_change once so player is in correct starting state
+            this._onPropertyChange();
         } catch (e) {
             logError(e);
         }
@@ -98,74 +94,76 @@ class MPRISWidget {
     }
 
     // Both Dbus & the MPRIS interface are active if CanPlay returns true
-    get is_running() {
-        if (this.proxy !== null) {
-            let canPlay = this.proxy.CanPlay;
-            return ( typeof canPlay === "boolean" && canPlay === true );
-        }
-        return false;
+    get _isRunning() {
+        let canPlay = this.proxy.CanPlay;
+        return ( typeof canPlay === "boolean" && canPlay === true );
     }
 
     // Callback when properties change on the MPRIS interface
-    on_prop_change(proxy, changed_properties, invalidated_properties) {
-        if (this.is_running && this.disabled) {
-            this.enable();
-        } 
-        else if(!this.is_running) {
-            this.disable();
-        }
+    _onPropertyChange(proxy, changedProperties, invalidatedProperties) {
+        switch(this.state) {
+            case widgetState.ENABLED:
+                // Restore to left most index in rightBox if container has been moved
+                if (Main.panel._rightBox.get_children()[0] != this.buttonContainer) {this.disable(); this.enable();}
+                // Compare proxies PlaybackStatus to our last recorded value, process button shift if theres a mismatch
+                if (this._isRunning) {
+                    let playbackStatus = this.proxy.PlaybackStatus;
+                    if(this.playbackStatus != playbackStatus) {
+                        this.playbackStatus = playbackStatus;
+                        // Swap Pause and Play buttons out from hiding
+                        switch(playbackStatus) {
+                            case "Paused":
+                                this.buttons.pause.hide();
+                                this.buttons.start.show();  
+                                break;
+                            case "Playing":
+                                this.buttons.start.hide();  
+                                this.buttons.pause.show();
+                                break;
+                        }
+                    }
+                } else {this.disable();}
+                break;
+            case widgetState.DISABLED:
+                if (this._isRunning) {this.enable();}
+                break;
 
-        // Compare proxies PlaybackStatus to our last recorded value, process button shift if theres a mismatch
-        let playbackStatus = this.proxy.PlaybackStatus;
-        if(this.playbackStatus != playbackStatus) {
-            this.playbackStatus = playbackStatus;
-            // Swap Pause and Play buttons out from hiding
-            switch(playbackStatus) {
-                case "Paused":
-                    this.buttons.pause.hide();
-                    this.buttons.start.show();  
-                    break;
-                case "Playing":
-                    this.buttons.start.hide();  
-                    this.buttons.pause.show();
-                    break;
-            }
-        }
-
-        // Restore to left most index in rightBox if container has been moved
-        if (!this.disabled && Main.panel._rightBox.get_children()[0] != this.buttonContainer) {
-            this.disable();
-            this.enable();
         }
     }
 
     // Insert container onto panel
     enable() {
-        if (this.is_running && !this.removed && this.disabled) {
-            Main.panel._rightBox.insert_child_at_index(this.buttonContainer, 0);
-            this.disabled = false;
+        switch (this.state) {
+            case widgetState.DISABLED:
+                Main.panel._rightBox.insert_child_at_index(this.buttonContainer, 0);
+                this.state = widgetState.ENABLED;
+                break;
         }
     }
 
     // Remove container from panel
     disable() {
-        if (!this.removed && !this.disabled) {
-            Main.panel._rightBox.remove_child(this.buttonContainer);
-            this.disabled = true;
-        }   
+        switch (this.state) {
+            case widgetState.ENABLED:
+                Main.panel._rightBox.remove_child(this.buttonContainer);
+                this.state = widgetState.DISABLED;
+                break;
+        }
     }
 
     // Run disable and additionally destroy the container and disconnect the on_props_changed event
     remove() {
-        if (!this.removed) {
-            this.disable();
-            // Disconnect all signals
-            this.connections.forEach((c) => c.object.disconnect(c.handler));
-            // Destroy children and container
-            this.buttonContainer.destroy_all_children();
-            this.buttonContainer.destroy();
-            // Mark class instance as removed
-            this.removed = true;
+        switch (this.state) {
+            case widgetState.ENABLED:
+                this.disable();
+            case widgetState.DISABLED:
+                // Disconnect all signals
+                this.connections.forEach((c) => c.object.disconnect(c.handler));
+                // Destroy children and container
+                this.buttonContainer.destroy();
+                // Mark class instance as removed
+                this.state = widgetState.REMOVED;
+                break;
         }
     }
 }
