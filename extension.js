@@ -14,16 +14,21 @@ let widget;
 
 
 function init() {}
+
 function enable() {
+    // Create a new MPRISWidget instance, object will enable itself when MPRIS player is running
     widget = new MPRISWidget("org.mpris.MediaPlayer2.spotify", introspection.MPRIS);
-    widget.enable();
+    // Connect buttons up to the MPRIS interface
+    widget.connect();
 }
 
 function disable() {
+    // Call widget destructor function and null to remove instance reference
     widget.remove();
     widget = null;
 }
 
+// Possible widget states
 const widgetState = Object.freeze({
     ENABLED: 1,
     DISABLED: 2,
@@ -36,39 +41,27 @@ class MPRISWidget {
         this.introspect = introspect;
         this.proxy = null;
         this.playbackStatus = null;
-        this.state = widgetState.ENABLED;
+        this.state = widgetState.DISABLED;
         this.connections = [];
 
+        // Collection of buttons that will be inserted and removed from the panel
         this.buttonContainer = new St.BoxLayout({ style_class: 'panel-status-menu-box', reactive: true,
                                                   can_focus: true, track_hover: true, vertical: false });
-        this.buttons = {};
-        this.buttons.forward = this._createButton('media-skip-forward-symbolic', this.buttonContainer);
-        this.buttons.start = this._createButton('media-playback-start-symbolic', this.buttonContainer);
-        this.buttons.pause = this._createButton('media-playback-pause-symbolic', this.buttonContainer);
-        this.buttons.backward = this._createButton('media-skip-backward-symbolic', this.buttonContainer);
-
-        this.buttons.pause.hide();
-
-        this._dbusProxyConnect();
-    }
-    _createButton(iconName, container) {
-        let icon = new St.Icon({icon_name: iconName, style_class: 'system-status-icon'});
-        let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, 
-                                  track_hover: true, x_fill: true, y_fill: false });
-        button.set_child(icon);
-
-        container.insert_child_at_index(button, 0);
         
-        return button;
+        // Create all required buttons, in the reverse order that they will appear in the panel
+        this.buttons = {};
+        this.buttons.forward = this._createContainerButton('media-skip-forward-symbolic', this.buttonContainer);
+        this.buttons.start = this._createContainerButton('media-playback-start-symbolic', this.buttonContainer);
+        this.buttons.pause = this._createContainerButton('media-playback-pause-symbolic', this.buttonContainer);
+        this.buttons.backward = this._createContainerButton('media-skip-backward-symbolic', this.buttonContainer);
+
+        // Hide pause so that we start with the play icon in center
+        this.buttons.pause.hide();
     }
 
-    _bind(func) {
-        return Lang.bind(this, func);
-    }
-
-    _dbusProxyConnect() {
+    // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
+    connect() {
         let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.introspect);
-        // Try and create a dbus proxy object then create callback connections for the buttons
         try {
             this.proxy = new dbusWrapper(
                 Gio.DBus.session,
@@ -76,58 +69,17 @@ class MPRISWidget {
                 '/org/mpris/MediaPlayer2'
             );
             // Attach callbacks for each button and to watch for property changes on the mpris interface
-            this._connect(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
-            this._connect(this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
-            this._connect(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
-            this._connect(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
-            this._connect(this.proxy, 'g-properties-changed', this._bind(this._onPropertyChange));
-            // Call on_prop_change once so player is in correct starting state
+            this._storeConnection(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
+            this._storeConnection(this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
+            this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
+            this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
+            this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._onPropertyChange));
+            // Call onPropertyChange once in case MPRIS player is already open.
             this._onPropertyChange();
         } catch (e) {
+            // Something went really wrong
             logError(e);
-        }
-    }
-
-    _connect(object, property, callback) {
-        let handler = object.connect(property, callback);
-        this.connections.push({"object": object, "handler": handler});
-    }
-
-    // Both Dbus & the MPRIS interface are active if CanPlay returns true
-    get _isRunning() {
-        let canPlay = this.proxy.CanPlay;
-        return ( typeof canPlay === "boolean" && canPlay === true );
-    }
-
-    // Callback when properties change on the MPRIS interface
-    _onPropertyChange(proxy, changedProperties, invalidatedProperties) {
-        switch(this.state) {
-            case widgetState.ENABLED:
-                // Restore to left most index in rightBox if container has been moved
-                if (Main.panel._rightBox.get_children()[0] != this.buttonContainer) {this.disable(); this.enable();}
-                // Compare proxies PlaybackStatus to our last recorded value, process button shift if theres a mismatch
-                if (this._isRunning) {
-                    let playbackStatus = this.proxy.PlaybackStatus;
-                    if(this.playbackStatus != playbackStatus) {
-                        this.playbackStatus = playbackStatus;
-                        // Swap Pause and Play buttons out from hiding
-                        switch(playbackStatus) {
-                            case "Paused":
-                                this.buttons.pause.hide();
-                                this.buttons.start.show();  
-                                break;
-                            case "Playing":
-                                this.buttons.start.hide();  
-                                this.buttons.pause.show();
-                                break;
-                        }
-                    }
-                } else {this.disable();}
-                break;
-            case widgetState.DISABLED:
-                if (this._isRunning) {this.enable();}
-                break;
-
+            this.remove();
         }
     }
 
@@ -151,7 +103,7 @@ class MPRISWidget {
         }
     }
 
-    // Run disable and additionally destroy the container and disconnect the on_props_changed event
+    // Run disable, disconnect any callbacks and destroy the container
     remove() {
         switch (this.state) {
             case widgetState.ENABLED:
@@ -165,5 +117,65 @@ class MPRISWidget {
                 this.state = widgetState.REMOVED;
                 break;
         }
+    }
+
+    // Create a button object with a passed icon and child it to a parent container
+    _createContainerButton(iconName, container) {
+        let icon = new St.Icon({icon_name: iconName, style_class: 'system-status-icon'});
+        let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, 
+                                  track_hover: true, x_fill: true, y_fill: false });
+        button.set_child(icon);
+
+        container.insert_child_at_index(button, 0);
+        
+        return button;
+    }
+
+    // Convenience function to shorten binds
+    _bind(func) {
+        return Lang.bind(this, func);
+    }
+
+    // Connects a callback up to an object property, storing handler for later disconnect
+    _storeConnection(object, property, callback) {
+        let handler = object.connect(property, callback);
+        this.connections.push({"object": object, "handler": handler});
+    }
+
+    // Modifies widget behavior based on MPRIS player's state
+    _onPropertyChange(proxy, changedProperties, invalidatedProperties) {
+        switch(this.state) {
+            case widgetState.ENABLED:
+                // Restore widget to left most index in rightBox if container has moved
+                if (Main.panel._rightBox.get_children()[0] != this.buttonContainer) {this.disable(); this.enable();}
+                if (this._isRunning) {
+                    // Callback fires multiple times so check if PlaybackStatus is different from last time we fired.
+                    let playbackStatus = this.proxy.PlaybackStatus;
+                    if(this.playbackStatus != playbackStatus) {
+                        this.playbackStatus = playbackStatus;
+                        // Swap Pause and Play buttons out from hiding based on playbackState
+                        switch(playbackStatus) {
+                            case "Paused":
+                                this.buttons.pause.hide();
+                                this.buttons.start.show();  
+                                break;
+                            case "Playing":
+                                this.buttons.start.hide();  
+                                this.buttons.pause.show();
+                                break;
+                        }
+                    }
+                } else {this.disable();} // The MPRIS player is no longer active
+                break;
+            case widgetState.DISABLED:
+                if (this._isRunning) {this.enable();} // The MPRIS player is now active
+                break;
+
+        }
+    }
+
+    // If canPlay is true it means that DBus is working and the MPRIS player is active
+    get _isRunning() {
+        return this.proxy.CanPlay;
     }
 }
