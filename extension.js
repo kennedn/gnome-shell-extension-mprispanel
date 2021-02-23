@@ -10,23 +10,95 @@ const Me = ExtensionUtils.getCurrentExtension();
 let introspection = {};
 introspection.DBus = Me.imports.dbus.DBus.Introspection;
 introspection.MPRIS = Me.imports.dbus.MPRIS.Introspection;
-let widget;
+let widgetController;
 
 
 function init() {}
 
 function enable() {
     // Create a new MPRISWidget instance, object will enable itself when MPRIS player is running
-    widget = new MPRISWidget("org.mpris.MediaPlayer2.spotify", introspection.MPRIS);
+    //widget = new MPRISWidget("org.mpris.MediaPlayer2.spotify", introspection.MPRIS);
+    widgetController = new MPRISController(introspection.DBus, "org.freedesktop.DBus", 
+                                           "/org/freedesktop/DBus", "org.mpris.MediaPlayer2");
+    widgetController.connect();
+    widgetController.startMonitor();
     // Connect buttons up to the MPRIS interface
-    widget.connect();
+    //widget.connect();
+
 }
 
 function disable() {
     // Call widget destructor function and null to remove instance reference
-    widget.remove();
-    widget = null;
+    // widget.remove();
+    // widget = null;
 }
+
+
+
+
+class MPRISController {
+    constructor(introspect, busInterface, busPath, filter) {
+        this.introspect = introspect;
+        this.proxy = null;
+        this.busInterface = busInterface;
+        this.busPath = busPath;
+        this.filter = filter;
+        this.widget = null;
+        this.widgetBusInterface = null;
+        this.state = widgetState.DISABLED;
+    }
+
+    connect() {
+        let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.introspect);
+        try {this.proxy = new dbusWrapper(Gio.DBus.session, this.busInterface, this.busPath);} 
+        catch (e) {logError(e);}
+    }
+
+    startMonitor() {
+        if (this._isRunning) {
+            let nextBusInterface = this._filterNames()[0];
+            if (nextBusInterface !== this.widgetBusInterface) {
+                this.widgetBusInterface = nextBusInterface;
+                log("Would have changed to " + this.widgetBusInterface);
+                // this.widget.remove();
+                // this.widget = new MPRISWidget(introspection.MPRIS, "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2");
+            }
+        }
+        GLib.timeout_add(0, 100, this._bind(this.startMonitor));
+    }
+    get _isRunning() {
+        let filteredNames = this._filterNames();
+        return (filteredNames.length > 0);
+    }
+
+    _filterNames() {
+        let filteredNames = this.proxy.ListNamesSync()[0].filter(v => v.includes(this.filter));
+        return filteredNames;
+    }
+
+    // Convenience function to shorten binds
+    _bind(func) {
+        return Lang.bind(this, func);
+    }
+
+}
+
+// get _mprisObjects() {
+//  let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.dbusIntrospect);
+//  let dbus_proxy;
+//  // If creating a proxy synchronously, you catch errors normally
+//  try {
+//      dbus_proxy = new dbusWrapper(
+//          Gio.DBus.session,
+//          'org.freedesktop.DBus',
+//          '/org/freedesktop/DBus'
+//      );
+//  } catch (e) {
+//      logError(e);
+//  }
+//  return dbus_proxy.ListNamesSync()[0].filter(v => v.includes("org.mpris.MediaPlayer2"));
+// }
+
 
 // Possible widget states
 const widgetState = Object.freeze({
@@ -34,12 +106,10 @@ const widgetState = Object.freeze({
     DISABLED: 2,
     REMOVED: 3,
 });
-class MPRISWidget {
+class MPRISWidget extends MPRISController{
 
-    constructor(busName, introspect) {
-        this.busName = busName;
-        this.introspect = introspect;
-        this.proxy = null;
+    constructor(introspect, busPath, busInterface) {
+        super(introspect, busPath, busInterface);
         this.playbackStatus = null;
         this.state = widgetState.DISABLED;
         this.connections = [];
@@ -61,26 +131,15 @@ class MPRISWidget {
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
     connect() {
-        let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.introspect);
-        try {
-            this.proxy = new dbusWrapper(
-                Gio.DBus.session,
-                this.busName,
-                '/org/mpris/MediaPlayer2'
-            );
-            // Attach callbacks for each button and to watch for property changes on the mpris interface
-            this._storeConnection(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
-            this._storeConnection(this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
-            this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
-            this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
-            this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._onPropertyChange));
-            // Call onPropertyChange once in case MPRIS player is already open.
-            this._onPropertyChange();
-        } catch (e) {
-            // Something went really wrong
-            logError(e);
-            this.remove();
-        }
+        super.connect();
+        // Attach callbacks for each button and to watch for property changes on the mpris interface
+        this._storeConnection(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
+        this._storeConnection(this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
+        this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
+        this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
+        this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._onPropertyChange));
+        // Call onPropertyChange once in case MPRIS player is already open.
+        this._onPropertyChange();
     }
 
     // Insert container onto panel
@@ -103,7 +162,7 @@ class MPRISWidget {
         }
     }
 
-    // Run disable, disconnect any callbacks and destroy the container
+    // Run disable if still enabled, disconnect any callback connections and destroy the container
     remove() {
         switch (this.state) {
             case widgetState.ENABLED:
@@ -121,25 +180,12 @@ class MPRISWidget {
 
     // Create a button object with a passed icon and child it to a parent container
     _createContainerButton(iconName, container) {
-        let icon = new St.Icon({icon_name: iconName, style_class: 'system-status-icon'});
         let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, 
                                   track_hover: true, x_fill: true, y_fill: false });
-        button.set_child(icon);
 
+        button.set_child(new St.Icon({icon_name: iconName, style_class: 'system-status-icon'}));
         container.insert_child_at_index(button, 0);
-        
         return button;
-    }
-
-    // Convenience function to shorten binds
-    _bind(func) {
-        return Lang.bind(this, func);
-    }
-
-    // Connects a callback up to an object property, storing handler for later disconnect
-    _storeConnection(object, property, callback) {
-        let handler = object.connect(property, callback);
-        this.connections.push({"object": object, "handler": handler});
     }
 
     // Modifies widget behavior based on MPRIS player's state
@@ -177,5 +223,10 @@ class MPRISWidget {
     // If canPlay is true it means that DBus is working and the MPRIS player is active
     get _isRunning() {
         return this.proxy.CanPlay;
+    }
+    
+    // Connects a callback up to an objects property, storing handler and object for later disconnect
+    _storeConnection(object, property, callback) {
+        this.connections.push({"object": object, "handler": object.connect(property, callback)});
     }
 }
