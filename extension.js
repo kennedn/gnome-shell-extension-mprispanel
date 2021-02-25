@@ -5,9 +5,10 @@ const Main = imports.ui.main;
 const Gio = imports.gi.Gio;
 const GLib = imports.gi.GLib;
 const Lang = imports.lang;
+const Clutter = imports.gi.Clutter;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
-let introspection = {};
+const introspection = {};
 introspection.DBus = Me.imports.dbus.DBus.Introspection;
 introspection.MPRIS = Me.imports.dbus.MPRIS.Introspection;
 let widgetController;
@@ -16,8 +17,8 @@ let widgetController;
 function init() {}
 
 function enable() {
-    widgetController = new MPRISController(introspection.DBus, "org.freedesktop.DBus", 
-                                           "/org/freedesktop/DBus", "org.mpris.MediaPlayer2");
+    widgetController = new MPRISController(introspection.DBus, introspection.MPRIS, 
+                                           "org.freedesktop.DBus", "/org/freedesktop/DBus");
     widgetController.enable();
 }
 
@@ -26,6 +27,11 @@ function disable() {
     widgetController = null;
 }
 
+String.prototype.capitalize = function() {
+    return this.charAt(0).toUpperCase() + this.slice(1);
+};
+
+// Base class defines a connection to a DBus interface via proxy
 class DBusProxy {
     constructor(introspect, busInterface, busPath) {
         this.introspect = introspect;
@@ -54,6 +60,7 @@ const widgetState = Object.freeze({
     REMOVED: 3,
 });
 
+// Defines a controller class that manages a child widget based on MPRIS interfaces availabe on DBus
 class MPRISController extends DBusProxy {
     constructor(dbusIntrospect, mprisIntrospect, busInterface, busPath, filter) {
         super(dbusIntrospect, busInterface, busPath);
@@ -64,23 +71,28 @@ class MPRISController extends DBusProxy {
         this.state = widgetState.DISABLED;
     }
 
+    // Monitor periodically for changes to DBus interfaces and recreate the widget with new interface if required
     _startMonitor() {
         switch (this.state) {
             case widgetState.ENABLED:
-                let nextInterface = this._filterNames[0];
+                // Get the top MPRIS interface from array of possible interfaces
+                let nextInterface = this._mprisInterfaces[0];
+                // Check for valid interface, must differ from current interface
                 if (nextInterface !== undefined && nextInterface !== this.widgetBusInterface) {
                     this.widgetBusInterface = nextInterface;
-                    
-                    log("Changing to " + this.widgetBusInterface);
+                    // Only bother to remove if the object exists
                     if (this.widget !== null) {this.widget.remove();}
+                    // Create a new widget with nextInterface and connect its signals up
                     this.widget = new MPRISWidget(this.mprisIntrospect, this.widgetBusInterface, "/org/mpris/MediaPlayer2");
                     this.widget.connect();
                 }
+                // Run monitor again in 250ms
                 GLib.timeout_add(0, 100, this._bind(this._startMonitor));
                 break;
         }
     }
 
+    // Connect DBus proxy and start monitoring for MPRIS changes
     enable() {
         switch (this.state) {
             case widgetState.DISABLED:
@@ -91,6 +103,7 @@ class MPRISController extends DBusProxy {
         }
     }
 
+    // Cleanly remove active widget and change state to REMOVED to break _startMonitor() loop;
     disable() {
         switch (this.state) {
             case widgetState.ENABLED:
@@ -101,14 +114,15 @@ class MPRISController extends DBusProxy {
         }
     }
 
-    get _filterNames() {
-        return this.proxy.ListNamesSync()[0].filter(v => v.includes(this.filter));
+    // Get a list of available DBus interfaces and filter down to MPRIS items
+    get _mprisInterfaces() {
+        return this.proxy.ListNamesSync()[0].filter(v => v.includes("org.mpris.MediaPlayer2"));
     }
 
 }
 
+// Defines a widget that exposes MPRIS controls as buttons on the gnome panel
 class MPRISWidget extends DBusProxy{
-
     constructor(introspect, busInterface, busPath) {
         super(introspect, busInterface, busPath);
         this.playbackStatus = null;
@@ -119,6 +133,8 @@ class MPRISWidget extends DBusProxy{
         this.buttonContainer = new St.BoxLayout({ style_class: 'panel-status-menu-box', reactive: true,
                                                   can_focus: true, track_hover: true, vertical: false });
         
+
+
         // Create all required buttons, in the reverse order that they will appear in the panel
         this.buttons = {};
         this.buttons.forward = this._createContainerButton('media-skip-forward-symbolic', this.buttonContainer);
@@ -128,6 +144,46 @@ class MPRISWidget extends DBusProxy{
 
         // Hide pause so that we start with the play icon in center
         this.buttons.pause.hide();
+
+        this.label = new St.Label({text: this.busInterface.split(".")[3].capitalize() + " ",
+                                   y_align: Clutter.ActorAlign.CENTER, x_align: Clutter.ActorAlign.FILL});
+        this.buttonContainer.insert_child_at_index(this.label, 0);
+
+        let timeline = new Clutter.Timeline({
+            'duration' : 500,
+        });
+        let alpha = new Clutter.Alpha({
+            'timeline' : timeline,
+            'mode' : Clutter.AnimationMode.EASE_IN_ELASTIC,
+        });
+        let behaviourScale = new Clutter.BehaviourScale({
+            'alpha' : alpha,
+            'y_scale_start' : 0.0,
+            'y_scale_end' : 1.0,
+        });
+        behaviourScale.apply(this.label);
+        timeline.start();
+
+        this._storeConnection(timeline, 'completed', this._bind(() => {
+            let timeline = new Clutter.Timeline({
+                'duration' : 500,
+            });
+            let alpha = new Clutter.Alpha({
+                'timeline' : timeline,
+                'mode' : Clutter.AnimationMode.EASE_IN_ELASTIC,
+            });
+            let behaviourScale = new Clutter.BehaviourScale({
+                'alpha' : alpha,
+                'y_scale_start' : 1.0,
+                'y_scale_end' : 0.0,
+            });
+            behaviourScale.apply(this.label);
+            timeline.start();
+            this._storeConnection(timeline, 'completed', this._bind((timeline) => {
+                 this.label.hide();
+            }));
+       }));
+        //this.label.set_opacity(0);
     }
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
@@ -148,6 +204,7 @@ class MPRISWidget extends DBusProxy{
         switch (this.state) {
             case widgetState.DISABLED:
                 Main.panel._rightBox.insert_child_at_index(this.buttonContainer, 0);
+                //this._displayLabel();
                 this.state = widgetState.ENABLED;
                 break;
         }
@@ -177,6 +234,10 @@ class MPRISWidget extends DBusProxy{
                 this.state = widgetState.REMOVED;
                 break;
         }
+    }
+
+    _displayLabel(enable=true) {
+
     }
 
     // Create a button object with a passed icon and child it to a parent container
