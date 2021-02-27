@@ -131,7 +131,7 @@ class MPRISWidget extends DBusProxy{
 
         // Collection of buttons that will be inserted and removed from the panel
         this.buttonContainer = new St.BoxLayout({ style_class: 'panel-status-menu-box', reactive: true,
-                                                  can_focus: true, track_hover: true, vertical: false });
+                                                  can_focus: true, track_hover: true, vertical: false});
         
 
 
@@ -145,45 +145,82 @@ class MPRISWidget extends DBusProxy{
         // Hide pause so that we start with the play icon in center
         this.buttons.pause.hide();
 
-        this.label = new St.Label({text: this.busInterface.split(".")[3].capitalize() + " ",
-                                   y_align: Clutter.ActorAlign.CENTER, x_align: Clutter.ActorAlign.FILL});
+        this.label = new St.Label({text: this.busInterface.split(".")[3].capitalize(),
+                                   x_expand: true, x_align: Clutter.ActorAlign.CENTER,
+                                   y_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this.buttonContainer.insert_child_at_index(this.label, 0);
+        this.label.hide();
 
-        let timeline = new Clutter.Timeline({
-            'duration' : 500,
-        });
-        let alpha = new Clutter.Alpha({
-            'timeline' : timeline,
-            'mode' : Clutter.AnimationMode.EASE_IN_ELASTIC,
-        });
-        let behaviourScale = new Clutter.BehaviourScale({
-            'alpha' : alpha,
-            'y_scale_start' : 0.0,
-            'y_scale_end' : 1.0,
-        });
-        behaviourScale.apply(this.label);
-        timeline.start();
+        this.animTime = 250;
+        this.waitTime = 90;
+    }
 
-        this._storeConnection(timeline, 'completed', this._bind(() => {
-            let timeline = new Clutter.Timeline({
-                'duration' : 500,
-            });
-            let alpha = new Clutter.Alpha({
-                'timeline' : timeline,
-                'mode' : Clutter.AnimationMode.EASE_IN_ELASTIC,
-            });
-            let behaviourScale = new Clutter.BehaviourScale({
-                'alpha' : alpha,
-                'y_scale_start' : 1.0,
-                'y_scale_end' : 0.0,
-            });
-            behaviourScale.apply(this.label);
-            timeline.start();
-            this._storeConnection(timeline, 'completed', this._bind((timeline) => {
-                 this.label.hide();
+    behaviourScale(object, duration, animationMode, xStart, xEnd, yStart, yEnd) {
+        let timeline = new Clutter.Timeline({'duration': duration});
+        let alpha = new Clutter.Alpha({'timeline' : timeline, 'mode': animationMode});
+        let behaviourScale = new Clutter.BehaviourScale({'alpha' : alpha, 'x_scale_start': xStart, 'x_scale_end': xEnd,
+                                           'y_scale_start': yStart, 'y_scale_end' : yEnd});
+        behaviourScale.apply(object);
+        return timeline;
+    }
+    startAnimation() {
+
+        let startAnim = this._bind(() => {
+            this.behaviourScale(this.buttons.forward, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+            this.behaviourScale(this.buttons.start, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+            this.behaviourScale(this.buttons.pause, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+            this.behaviourScale(this.buttons.backward, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+        });
+        let midAnim = this._bind(() => {
+            let forwardAnim = this.behaviourScale(this.buttons.forward, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0);
+            forwardAnim.start();
+            this.behaviourScale(this.buttons.start, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0).start();
+            this.behaviourScale(this.buttons.pause, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0).start();
+            this.behaviourScale(this.buttons.backward, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0).start();
+
+            this._storeConnection(forwardAnim, 'completed', this._bind((t) => {
+                //Object.entries(this.buttons).forEach(([k, v]) => v.hide());
+                this.buttons.forward.hide();
+                this.buttons.backward.hide();
+                this.buttons.pause.hide();
+                this.buttons.start.hide();
+                GLib.timeout_add(0, this.waitTime, this._bind(() => {
+                    this.label.show();
+                    this.behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
+                }));
             }));
-       }));
-        //this.label.set_opacity(0);
+        });
+        let endAnim = this._bind(() => {
+            let labelAnim = this.behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0);
+            labelAnim.start();
+            this._storeConnection(labelAnim, 'completed', this._bind((t) => {
+                this.label.hide();
+                GLib.timeout_add(0, this.waitTime, this._bind(() => {
+                    this.buttons.forward.show();
+                    this.buttons.backward.show();
+                    switch(this.playbackStatus) {
+                        case "Paused":
+                            this.buttons.pause.hide();
+                            this.buttons.start.show();
+                            this.behaviourScale(this.buttons.start, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
+                            this.buttons.pause.set_scale(1, 1);
+                            break;
+                        case "Playing":
+                            this.buttons.start.hide();  
+                            this.buttons.pause.show();
+                            this.behaviourScale(this.buttons.pause, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
+                            this.buttons.start.set_scale(1, 1);
+                            break;
+                    }
+                    this.behaviourScale(this.buttons.forward, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
+                    this.behaviourScale(this.buttons.backward, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
+                }));
+            }));
+        });
+
+        startAnim();
+        GLib.timeout_add(0, this.waitTime * 2,  midAnim);
+        GLib.timeout_add(0, this.animTime * 2 + this.waitTime * 4, endAnim);
     }
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
@@ -197,6 +234,7 @@ class MPRISWidget extends DBusProxy{
         this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._onPropertyChange));
         // Call onPropertyChange once in case MPRIS player is already open.
         this._onPropertyChange();
+        this.startAnimation();
     }
 
     // Insert container onto panel
@@ -236,10 +274,6 @@ class MPRISWidget extends DBusProxy{
         }
     }
 
-    _displayLabel(enable=true) {
-
-    }
-
     // Create a button object with a passed icon and child it to a parent container
     _createContainerButton(iconName, container) {
         let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, 
@@ -251,7 +285,8 @@ class MPRISWidget extends DBusProxy{
     }
 
     // Modifies widget behavior based on MPRIS player's state
-    _onPropertyChange(proxy, changedProperties, invalidatedProperties) {
+    _onPropertyChange() {
+        log("State: " + this.state + ", Running: " + this._isRunning + " PlaybackStatus: " + this.proxy.PlaybackStatus);
         switch(this.state) {
             case widgetState.ENABLED:
                 // Restore widget to left most index in rightBox if container has moved
@@ -265,7 +300,7 @@ class MPRISWidget extends DBusProxy{
                         switch(playbackStatus) {
                             case "Paused":
                                 this.buttons.pause.hide();
-                                this.buttons.start.show();  
+                                this.buttons.start.show();
                                 break;
                             case "Playing":
                                 this.buttons.start.hide();  
