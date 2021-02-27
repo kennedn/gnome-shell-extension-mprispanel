@@ -151,7 +151,7 @@ class MPRISWidget extends DBusProxy{
         this.buttonContainer.insert_child_at_index(this.label, 0);
         this.label.hide();
 
-        this.animTime = 250;
+        this.animTime = 220;
         this.waitTime = 90;
     }
 
@@ -165,30 +165,20 @@ class MPRISWidget extends DBusProxy{
     }
     startAnimation() {
 
-        let startAnim = this._bind(() => {
-            this.behaviourScale(this.buttons.forward, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
-            this.behaviourScale(this.buttons.start, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
-            this.behaviourScale(this.buttons.pause, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
-            this.behaviourScale(this.buttons.backward, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
-        });
+        // let startAnim = this._bind(() => {
+        //     this.behaviourScale(this.buttons.forward, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+        //     this.behaviourScale(this.buttons.start, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+        //     this.behaviourScale(this.buttons.pause, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+        //     this.behaviourScale(this.buttons.backward, this.waitTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 0, 1).start();
+        // });
         let midAnim = this._bind(() => {
-            let forwardAnim = this.behaviourScale(this.buttons.forward, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0);
-            forwardAnim.start();
-            this.behaviourScale(this.buttons.start, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0).start();
-            this.behaviourScale(this.buttons.pause, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0).start();
-            this.behaviourScale(this.buttons.backward, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0).start();
-
-            this._storeConnection(forwardAnim, 'completed', this._bind((t) => {
-                //Object.entries(this.buttons).forEach(([k, v]) => v.hide());
-                this.buttons.forward.hide();
-                this.buttons.backward.hide();
-                this.buttons.pause.hide();
-                this.buttons.start.hide();
-                GLib.timeout_add(0, this.waitTime, this._bind(() => {
-                    this.label.show();
-                    this.behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
-                }));
-            }));
+            //Object.entries(this.buttons).forEach(([k, v]) => v.hide());
+            this.buttons.forward.hide();
+            this.buttons.backward.hide();
+            this.buttons.pause.hide();
+            this.buttons.start.hide();
+            this.label.show();
+            this.behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1).start();
         });
         let endAnim = this._bind(() => {
             let labelAnim = this.behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0);
@@ -218,9 +208,12 @@ class MPRISWidget extends DBusProxy{
             }));
         });
 
-        startAnim();
-        GLib.timeout_add(0, this.waitTime * 2,  midAnim);
-        GLib.timeout_add(0, this.animTime * 2 + this.waitTime * 4, endAnim);
+        // startAnim();
+        // GLib.timeout_add(0, this.waitTime * 2,  midAnim);
+        // GLib.timeout_add(0, this.animTime * 2 + this.waitTime * 4, endAnim);
+        midAnim();
+        GLib.timeout_add(0, this.animTime + this.waitTime, endAnim);
+
     }
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
