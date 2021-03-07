@@ -20,14 +20,13 @@ String.prototype.capitalize = function() {
 function init() {}
 
 function enable() {
-    let enabledInterfaces = ['spotify', 'firefox'];
     widgetController = new MPRISController(introspection.DBus, introspection.MPRIS, 
-                                           "org.freedesktop.DBus", "/org/freedesktop/DBus", enabledInterfaces);
+                                           "org.freedesktop.DBus", "/org/freedesktop/DBus");
     widgetController.enable();
 }
 
 function disable() {
-    widgetController.disable();
+    widgetController.remove();
     widgetController = null;
 }
 
@@ -38,6 +37,7 @@ class DBusProxy {
         this.proxy = null;
         this.busInterface = busInterface;
         this.busPath = busPath;
+        this.connections = [];
     }
 
     connect() {
@@ -46,9 +46,18 @@ class DBusProxy {
         catch (e) {logError(e);}
     }
 
+    remove() {
+        this.connections.forEach(c => c.object.disconnect(c.handler));
+    }
+
     // Convenience function to shorten binds
     _bind(func) {
         return Lang.bind(this, func);
+    }
+
+    // Connects a callback up to an objects property, storing handler and object for later disconnect
+    _storeConnection(object, property, callback) {
+        this.connections.push({"object": object, "handler": object.connect(property, callback)});
     }
 }
 
@@ -63,14 +72,41 @@ const widgetState = Object.freeze({
 
 // Defines a controller class that manages a child widget based on MPRIS interfaces availabe on DBus
 class MPRISController extends DBusProxy {
-    constructor(dbusIntrospect, mprisIntrospect, busInterface, busPath, enabledInterfaces) {
+    constructor(dbusIntrospect, mprisIntrospect, busInterface, busPath) {
         super(dbusIntrospect, busInterface, busPath);
-        this.enabledInterfaces = enabledInterfaces;
         this.widget = null;
         this.mprisIntrospect = mprisIntrospect;
         this.widgetBusInterface = null;
         this.state = widgetState.DISABLED;
+
+        // Create a SchemaSource object so that we can search for our extensions schema
+        let gschema = Gio.SettingsSchemaSource.new_from_directory(
+            Me.dir.get_child('schemas').get_path(),
+            Gio.SettingsSchemaSource.get_default(),
+            false
+        );
+        // Build a settings object from our extensions schema
+        this.settings = new Gio.Settings({
+            settings_schema: gschema.lookup('org.gnome.shell.extensions.mprispanel', true)
+        });
+
+        // Set gsettings derived variables to default settings and then attempt to parse gsettings
+        this.detectedInterfaces = "";
+        this.enabledInterfaces = [];
         this.whitelist = false;
+        this._storeConnection(this.settings, 'changed::enabled-interfaces', this._bind(this._parseSettings));
+        this._storeConnection(this.settings, 'changed::whitelist', this._bind(this._parseSettings));
+        this._parseSettings();
+    }
+
+    // Callback for change to gsettings
+    _parseSettings() {
+        // Parse comma seperated gsettings string into an array of enabledInterfaces
+        this.enabledInterfaces = this.settings.get_string('enabled-interfaces').replace(/\s/g,'').toLowerCase().split(',');
+        // Get whitelist boolean from gsettings
+        this.whitelist = this.settings.get_boolean('whitelist');
+        // Set widgetBusInterface back to null to prompt _monitor() to recreate widget
+        this.widgetBusInterface = null;
     }
 
     // Connect DBus proxy and start monitoring for MPRIS changes
@@ -85,14 +121,11 @@ class MPRISController extends DBusProxy {
     }
 
     // Cleanly remove active widget and change state to REMOVED to break _monitor() loop;
-    disable() {
-        switch (this.state) {
-            case widgetState.ENABLED:
-                this.state = widgetState.REMOVED;
-                if (this.widget !== null) {this.widget.remove();}
-                this.widget = null;
-                break;
-        }
+    remove() {
+        super.remove();
+        this.state = widgetState.REMOVED;
+        if (this.widget !== null) {this.widget.remove();}
+        this.widget = null;
     }
 
     // Monitor periodically for changes to DBus interfaces and recreate the widget with new interface if required
@@ -116,15 +149,23 @@ class MPRISController extends DBusProxy {
         }
     }
 
-    // Returns 'preferred' MPRIS interface where possible
-    // Traverse enabledInterfaces first and attempt to return first matching MPRIS interface
-    // If no matches found and whitelist is false, return the first remaining MPRIS interface
+    // Get and parse a list of available MPRIS interfaces from DBus, return most 'preferred' interface
     get _mprisInterface() {
         let mprisInterfaces = this.proxy.ListNamesSync()[0].filter(v => v.includes("org.mpris.MediaPlayer2"));
+
+        // Parse mpris interfaces into a readible list and store in gsettings for prefs.js to print
+        let detectedInterfaces = mprisInterfaces.map(m => m.split(".")[3]).join(', ');
+        if (this.detectedInterfaces !== detectedInterfaces) {
+            this.detectedInterfaces = detectedInterfaces;
+            this.settings.set_string('detected-interfaces', detectedInterfaces);
+        }
+
+        // Iterate over enabledInterfaces and return first available interface
         for(let e of this.enabledInterfaces) {
             let iface = mprisInterfaces.find(v => v.includes(e));
             if (iface !== undefined) {return iface;}
         }
+        // If whitelist is false and at least one interface exists, return first leftover interface
         return (this.whitelist || mprisInterfaces.length < 1) ? undefined : mprisInterfaces[0];
     }
 }
@@ -135,7 +176,6 @@ class MPRISWidget extends DBusProxy{
         super(introspect, busInterface, busPath);
         this.playbackStatus = "Paused";
         this.state = widgetState.DISABLED;
-        this.connections = [];
 
         // Collection of buttons that will be inserted and removed from the panel
         this.buttonContainer = new St.BoxLayout({ style_class: 'panel-status-menu-box', reactive: true,
@@ -160,7 +200,7 @@ class MPRISWidget extends DBusProxy{
 
         // Animation constants
         this.animTime = 220;
-        this.waitTime = 90;
+        this.waitTime = 200;
     }
 
 
@@ -202,13 +242,12 @@ class MPRISWidget extends DBusProxy{
 
     // Run disable if still enabled, disconnect any callback connections and destroy the container
     remove() {
+        super.remove();
         // Mark class instance as removed
         this.state = widgetState.REMOVED;
         if (this.buttonContainer in Main.panel._rightBox.get_children()) {
             Main.panel._rightBox.remove_child(this.buttonContainer);
         }
-        // Disconnect all signals
-        this.connections.forEach(c => c.object.disconnect(c.handler));
         // Destroy children and container
         this.buttonContainer.destroy();
     }
@@ -312,11 +351,6 @@ class MPRISWidget extends DBusProxy{
                                            'y_scale_start': yStart, 'y_scale_end' : yEnd});
         behaviourScale.apply(object);
         return timeline;
-    }
-
-    // Connects a callback up to an objects property, storing handler and object for later disconnect
-    _storeConnection(object, property, callback) {
-        this.connections.push({"object": object, "handler": object.connect(property, callback)});
     }
 
     // If canPlay is true it means that DBus is working and the MPRIS player is active
