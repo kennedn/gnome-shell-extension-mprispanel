@@ -1,7 +1,13 @@
-# gnome-shell-extension-spotify-controls
+# gnome-shell-extension-mprispanel
 
-Adds media controls to the gnome panel for spotify. 
+Adds controls to the gnome panel for MPRIS enabled media players
 
-Uses DBus to speak with Spotify's MPRIS interface. Has the potential to be used for any MPRIS enabled player (may happen in a future release).
+Uses DBus to interact with all available media players. A 'smart-switching' technique is leveraged to decide which player to control.
 
-<img src="https://i.imgur.com/09cBk0G.gif" alt="drawing" width="600"/>
+Users can specify a list of preferred media players to control. **mprispanel** will select the first available player it can find, and if whitelist is set to false, will then pick from any remaining players.
+
+For example, in the below settings we have enabled spotify as our primary player, with firefox as a close second. The player will always try to pick the most 'preferred' player to control:
+
+<img src="images/gsettings.png" width="400"/>
+
+<img src="images/mprispanel.gif" width="600"/>

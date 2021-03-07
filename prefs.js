@@ -42,7 +42,8 @@ function buildPrefsWidget() {
     // enabled-interfaces label
     let detected = new Gtk.Entry({
         text: this.settings.get_string('detected-interfaces'),
-        halign: Gtk.Align.END,
+        halign: Gtk.Align.FILL,
+        hexpand: true,
         visible: true,
         editable: false,
         can_focus: false
@@ -70,7 +71,8 @@ function buildPrefsWidget() {
     // enabled-interfaces, populate with text from gsettings
     let entry = new Gtk.Entry({
         text: this.settings.get_string('enabled-interfaces'),
-        halign: Gtk.Align.END,
+        halign: Gtk.Align.FILL,
+        hexpand: true,
         visible: true
     });
     prefsWidget.attach(entry, 1, 1, 1, 1);
@@ -98,7 +100,7 @@ function buildPrefsWidget() {
 
     let toggle = new Gtk.Switch({
         active: this.settings.get_boolean('whitelist'),
-        halign: Gtk.Align.END,
+        halign: Gtk.Align.START,
         visible: true
     });
     prefsWidget.attach(toggle, 1, 2, 1, 1);
