@@ -86,10 +86,12 @@ function buildPrefsWidget() {
 
     // Copy entry.text to gsettings when set button is clicked
     button.connect('clicked', (b) => {
+        // Filter input down to a comma seperated list of values
+        entry.set_text(entry.text.replace(/\s/g, '').toLowerCase().split(",").filter(n => n).join(","));
         this.settings.set_string('enabled-interfaces', entry.text);
     }); 
 
-    // Create a label & switch for `show-indicator`
+    // Create a label & switch for `whitelist`
     let toggleLabel = new Gtk.Label({
         label: 'Whitelist:',
         halign: Gtk.Align.START,
@@ -105,7 +107,7 @@ function buildPrefsWidget() {
     });
     prefsWidget.attach(toggle, 1, 2, 1, 1);
 
-    // Bind the switch to the `show-indicator` key
+    // Bind the switch to the `whitelist` key
     this.settings.bind(
         'whitelist',
         toggle,
@@ -113,7 +115,7 @@ function buildPrefsWidget() {
         Gio.SettingsBindFlags.DEFAULT
     );
 
-    // Resize the window to minimum width on creation
+    // Resize the window to minimum dimensions on creation
     prefsWidget.connect('realize', () => prefsWidget.get_toplevel().resize(1, 1));
 
     // Return our widget which will be added to the window

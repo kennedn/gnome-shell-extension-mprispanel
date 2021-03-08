@@ -13,10 +13,6 @@ introspection.DBus = Me.imports.dbus.DBus.Introspection;
 introspection.MPRIS = Me.imports.dbus.MPRIS.Introspection;
 let widgetController;
 
-String.prototype.capitalize = function() {
-    return this.charAt(0).toUpperCase() + this.slice(1);
-};
-
 function init() {}
 
 function enable() {
@@ -40,12 +36,14 @@ class DBusProxy {
         this.connections = [];
     }
 
+    // Create a proxy object connecting to a remote DBus interface
     connect() {
         let dbusWrapper = Gio.DBusProxy.makeProxyWrapper(this.introspect);
         try {this.proxy = new dbusWrapper(Gio.DBus.session, this.busInterface, this.busPath);} 
         catch (e) {logError(e);}
     }
 
+    // Disconnect all stored connections
     remove() {
         this.connections.forEach(c => c.object.disconnect(c.handler));
     }
@@ -55,7 +53,7 @@ class DBusProxy {
         return Lang.bind(this, func);
     }
 
-    // Connects a callback up to an objects property, storing handler and object for later disconnect
+    // Obj.connect wrapper that stores handler and object for later disconnect
     _storeConnection(object, property, callback) {
         this.connections.push({"object": object, "handler": object.connect(property, callback)});
     }
@@ -102,7 +100,7 @@ class MPRISController extends DBusProxy {
     // Callback for change to gsettings
     _parseSettings() {
         // Parse comma seperated gsettings string into an array of enabledInterfaces
-        this.enabledInterfaces = this.settings.get_string('enabled-interfaces').replace(/\s/g,'').toLowerCase().split(',');
+        this.enabledInterfaces = this.settings.get_string('enabled-interfaces').split(',');
         // Get whitelist boolean from gsettings
         this.whitelist = this.settings.get_boolean('whitelist');
         // Set widgetBusInterface back to null to prompt _monitor() to recreate widget
@@ -192,7 +190,10 @@ class MPRISWidget extends DBusProxy{
         this.buttons.pause.hide();
 
         // Build a shorthand identifier label derived from busInterface string
-        this.label = new St.Label({text: this.busInterface.split(".")[3].capitalize(),
+        let labelText = this.busInterface.split(".")[3];
+        // Capitalize text
+        labelText = labelText[0].toUpperCase() + labelText.slice(1);
+        this.label = new St.Label({text: labelText,
                                    x_expand: true, x_align: Clutter.ActorAlign.CENTER,
                                    y_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this.buttonContainer.insert_child_at_index(this.label, 0);
