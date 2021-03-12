@@ -325,7 +325,11 @@ class MPRISWidget extends DBusProxy{
                 } else {this.disable();} // The MPRIS player is no longer active
                 break;
             case widgetState.DISABLED:
-                if (this._isRunning) {this.enable(); this._update();} // The MPRIS player is now active
+                // If isRunning then push the widget to the panel, else try reconnecting for problimatic players (vlc)
+                if (this._isRunning) {
+                    this.enable(); 
+                    this._update();
+                } else {this.connect();}
                 break;
 
         }
