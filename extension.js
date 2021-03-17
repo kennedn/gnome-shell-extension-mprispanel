@@ -46,6 +46,7 @@ class DBusProxy {
     // Disconnect all stored connections
     remove() {
         this.connections.forEach(c => c.object.disconnect(c.handler));
+        this.connections = [];
     }
 
     // Convenience function to shorten binds
@@ -207,6 +208,9 @@ class MPRISWidget extends DBusProxy{
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
     connect() {
+        // Remove any residual connections
+        super.remove();
+        // Connect this.proxy to MPRIS interface
         super.connect();
         // Attach callbacks for each button and to watch for property changes on the mpris interface
         this._storeConnection(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
@@ -290,6 +294,7 @@ class MPRISWidget extends DBusProxy{
                         // Once button animations are through, unlock widget by setting state to previous value
                         this._storeConnection(endAnims[0], 'completed', this._bind(t => {
                             this.state = tempState; 
+                            for(let b in this.buttons) {this.buttons[b].set_scale(1, 1);} 
                             this._update();
                         }));
                     }));
