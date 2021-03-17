@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.mprispanel" path="/org/gnome/shell/extensions/mprispanel/">
+    <!-- The key type "a{sb}" describes a dictionary of string-boolean pairs -->
+    <!-- See also: https://developer.gnome.org/glib/stable/gvariant-format-strings.html -->
+    <key name="detected-interfaces" type="s">
+      <default>""</default>
+    </key>
+    <key name="enabled-interfaces" type="s">
+      <default>""</default>
+    </key>
+    <key name="whitelist" type="b">
+      <default>false</default>
+    </key>
+  </schema>
+</schemalist>
