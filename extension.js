@@ -193,8 +193,8 @@ class MPRISWidget extends DBusProxy{
         // Build a shorthand identifier label derived from busInterface string
         let labelText = this.busInterface.split(".")[3];
         // Capitalize text
-        labelText = labelText[0].toUpperCase() + labelText.slice(1);
-        this.label = new St.Label({text: labelText,
+        this.labelText = labelText[0].toUpperCase() + labelText.slice(1);
+        this.label = new St.Label({text: this.labelText,
                                    x_expand: true, x_align: Clutter.ActorAlign.CENTER,
                                    y_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this.buttonContainer.insert_child_at_index(this.label, 0);
@@ -218,6 +218,9 @@ class MPRISWidget extends DBusProxy{
         this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
         this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
         this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._update));
+        log(this.labelText + ": " + widgetState.ENABLED);
+        // Recursively re-call connect on timeout for problem players (VLC)
+        if (!this._isRunning) { GLib.timeout_add(0, 100, this._bind(this.connect)); return;}
         // Call update once in case MPRIS player is already open.
         this._update();
         // Trigger start animation
@@ -283,7 +286,7 @@ class MPRISWidget extends DBusProxy{
                     GLib.timeout_add(0, this.waitTime, this._bind(() => {
                         // Unhide correct buttons based on this.playbackStatus
                         for(let b in this.buttons) {this.buttons[b].show();} 
-                        if(this.playbackStatus == "Paused") {this.buttons.pause.hide();}
+                        if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
                         if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
                         // Animate all buttons into view (hidden buttons wont show)
                         let endAnims = [];
@@ -316,6 +319,7 @@ class MPRISWidget extends DBusProxy{
                         // Swap Pause and Play buttons out from hiding based on playbackState
                         switch(playbackStatus) {
                             case "Paused":
+                            case "Stopped":
                                 this.playbackStatus = playbackStatus;
                                 this.buttons.pause.hide();
                                 this.buttons.start.show();
@@ -331,10 +335,7 @@ class MPRISWidget extends DBusProxy{
                 break;
             case widgetState.DISABLED:
                 // If isRunning then push the widget to the panel, else try reconnecting for problimatic players (vlc)
-                if (this._isRunning) {
-                    this.enable(); 
-                    this._update();
-                } else {this.connect();}
+                if (this._isRunning) {this.enable(); this._update();}
                 break;
 
         }
@@ -342,8 +343,7 @@ class MPRISWidget extends DBusProxy{
 
     // Returns a button object, which has been childed under container
     _createContainerButton(iconName, container) {
-        let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, 
-                                  track_hover: true, x_fill: true, y_fill: false });
+        let button = new St.Bin({ reactive: true, can_focus: true, track_hover: true});
         button.set_child(new St.Icon({icon_name: iconName, style_class: 'system-status-icon'}));
         container.insert_child_at_index(button, 0);
         return button;
