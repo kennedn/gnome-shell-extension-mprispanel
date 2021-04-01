@@ -262,7 +262,7 @@ class MPRISWidget extends DBusProxy{
 
 
     // Animates a label to inform user that mpris object has changed
-    _animate() {
+    _animate_legacy() {
         // Store previous widget state then lock widget with an ANIMATING state
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
@@ -304,6 +304,27 @@ class MPRISWidget extends DBusProxy{
                 }));
             }));
         }));
+    }
+
+    _animate() {
+        // Store previous widget state then lock widget with an ANIMATING state
+        let tempState = this.state;
+        this.state = widgetState.ANIMATING;
+
+        // Hide all buttons, animate label into view
+        for(let b in this.buttons) {this.buttons[b].hide();}
+        this.label.show();
+        this.label.ease({
+            scale_x: 0,
+            scale_y: 1,
+            duration: this.animTime,
+            mode: Clutter.AnimationMode.EASE_OUT_ELASTIC,
+            onComplete: () => {
+                log("finished animation");
+                this.state = tempState; 
+            },
+        });
+ 
     }
 
     // Modifies widget behavior based on MPRIS player's state
