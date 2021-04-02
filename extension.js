@@ -201,9 +201,13 @@ class MPRISWidget extends DBusProxy{
         this.label.hide();
 
         // Animation constants
-        this.animTime = 220;
-        this.waitTime = 200;
-	this._animate = (typeof Clutter.BehaviourScale === 'function') ? this._bind(this._animate_bscale) : this._bind(this._animate_ease); 
+        this.startTime = 380;
+        this.animTime = 100;
+        this.waitTime = 150;
+        // Older versions of gnome must rely on behaviour scaling for animations, newer versions can use easing
+        this._animate = (typeof Clutter.BehaviourScale === 'function') ? 
+                         this._bind(this._animate_bscale) : 
+                         this._bind(this._animate_ease); 
     }
 
 
@@ -219,7 +223,6 @@ class MPRISWidget extends DBusProxy{
         this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
         this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
         this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._update));
-        log(this.labelText + ": " + widgetState.ENABLED);
         // Recursively re-call connect on timeout for problem players (VLC)
         if (!this._isRunning) { GLib.timeout_add(0, 100, this._bind(this.connect)); return;}
         // Call update once in case MPRIS player is already open.
@@ -262,7 +265,7 @@ class MPRISWidget extends DBusProxy{
     }
 
 
-    // Animates a label to inform user that mpris object has changed
+    // Animates MPRIS player changing, uses BehaviourScale to drive animation
     _animate_bscale() {
         // Store previous widget state then lock widget with an ANIMATING state
         let tempState = this.state;
@@ -271,7 +274,7 @@ class MPRISWidget extends DBusProxy{
         // Hide all buttons, animate label into view
         for(let b in this.buttons) {this.buttons[b].hide();}
         this.label.show();
-        let labelInAnim = this._behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1);
+        let labelInAnim = this._behaviourScale(this.label, this.startTime, Clutter.AnimationMode.EASE_OUT_ELASTIC, 1, 1, 0, 1);
         labelInAnim.start(); 
 
         // Wait for label to finish animating
@@ -307,6 +310,7 @@ class MPRISWidget extends DBusProxy{
         }));
     }
 
+    // Animates MPRIS player changing, uses Obj.ease to drive animation
     _animate_ease() {
         // Store previous widget state then lock widget with an ANIMATING state
         let tempState = this.state;
@@ -316,7 +320,7 @@ class MPRISWidget extends DBusProxy{
         for(let b in this.buttons) {this.buttons[b].hide();}
         this.label.show();
         this.label.set_scale(1, 0);
-        this.label.ease({scale_y: 1, duration: this.animTime * 2, mode: Clutter.AnimationMode.EASE_OUT_ELASTIC,
+        this.label.ease({scale_y: 1, duration: this.startTime, mode: Clutter.AnimationMode.EASE_OUT_ELASTIC,
             onComplete: this._bind(() => {
                 GLib.timeout_add(0, this.waitTime, this._bind(() => {
                     this.label.set_scale(1, 1);
@@ -348,7 +352,6 @@ class MPRISWidget extends DBusProxy{
             })
         });
     }
-
 
 
     // Modifies widget behavior based on MPRIS player's state
