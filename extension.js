@@ -212,9 +212,7 @@ class MPRISWidget extends DBusProxy{
 
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
-    connect() {
-        // Remove any residual connections
-        super.remove();
+    connect(update=true) {
         // Connect this.proxy to MPRIS interface
         super.connect();
         // Attach callbacks for each button and to watch for property changes on the mpris interface
@@ -223,12 +221,9 @@ class MPRISWidget extends DBusProxy{
         this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
         this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
         this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._update));
-        // Recursively re-call connect on timeout for problem players (VLC)
-        if (!this._isRunning) { GLib.timeout_add(0, 100, this._bind(this.connect)); return;}
+
         // Call update once in case MPRIS player is already open.
-        this._update();
-        // Trigger start animation
-        if (this.state == widgetState.ENABLED) {this._animate();}
+        if (update) {this._update();}
     }
 
     // Insert container onto panel
@@ -264,13 +259,53 @@ class MPRISWidget extends DBusProxy{
         this.buttonContainer.destroy();
     }
 
+    // Modifies widget behavior based on MPRIS player's state
+    _update() {
+        switch(this.state) {
+            case widgetState.ENABLED:
+                // Restore widget to left most index in rightBox if container has moved
+                if (Main.panel._rightBox.get_children()[0] != this.buttonContainer) {this.disable(); this.enable();}
+                if (this._isRunning) {
+                    // Callback fires multiple times so check if PlaybackStatus is different from last time we fired.
+                    let playbackStatus = this.proxy.PlaybackStatus;
+                    if(this.playbackStatus != playbackStatus) {
+                        // Swap Pause and Play buttons out from hiding based on playbackState
+                        switch(playbackStatus) {
+                            case "Paused":
+                            case "Stopped":
+                                this.playbackStatus = playbackStatus;
+                                this.buttons.pause.hide();
+                                this.buttons.start.show();
+                                break;
+                            case "Playing":
+                                this.playbackStatus = playbackStatus;
+                                this.buttons.start.hide();  
+                                this.buttons.pause.show();
+                                break;
+                        }
+                    }
+                } else {this.disable();} // The MPRIS player is no longer active
+                break;
+            case widgetState.DISABLED:
+                // Enable player and perform initial animations
+                if (this._isRunning) {
+                    this.enable();
+                    this._animate();
+                } else {
+                    // If _update callback is firing but _isRunning is false then DBus connection is in a partial state (VLC)
+                    // Try reconnecting but ask the function to not call update so we don't get stuck in a recursive loop
+                    this.connect(false);
+                }
+                break;
+        }
+    }
+
 
     // Animates MPRIS player changing, uses BehaviourScale to drive animation
     _animate_bscale() {
-        // Store previous widget state then lock widget with an ANIMATING state
+        // Store current state to restore later and switch to ANIMATING
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
-
         // Hide all buttons, animate label into view
         for(let b in this.buttons) {this.buttons[b].hide();}
         this.label.show();
@@ -312,10 +347,9 @@ class MPRISWidget extends DBusProxy{
 
     // Animates MPRIS player changing, uses Obj.ease to drive animation
     _animate_ease() {
-        // Store previous widget state then lock widget with an ANIMATING state
+        // Store current state to restore later and switch to ANIMATING
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
-
         // Hide all buttons, animate label into view
         for(let b in this.buttons) {this.buttons[b].hide();}
         this.label.show();
@@ -354,40 +388,6 @@ class MPRISWidget extends DBusProxy{
     }
 
 
-    // Modifies widget behavior based on MPRIS player's state
-    _update() {
-        switch(this.state) {
-            case widgetState.ENABLED:
-                // Restore widget to left most index in rightBox if container has moved
-                if (Main.panel._rightBox.get_children()[0] != this.buttonContainer) {this.disable(); this.enable();}
-                if (this._isRunning) {
-                    // Callback fires multiple times so check if PlaybackStatus is different from last time we fired.
-                    let playbackStatus = this.proxy.PlaybackStatus;
-                    if(this.playbackStatus != playbackStatus) {
-                        // Swap Pause and Play buttons out from hiding based on playbackState
-                        switch(playbackStatus) {
-                            case "Paused":
-                            case "Stopped":
-                                this.playbackStatus = playbackStatus;
-                                this.buttons.pause.hide();
-                                this.buttons.start.show();
-                                break;
-                            case "Playing":
-                                this.playbackStatus = playbackStatus;
-                                this.buttons.start.hide();  
-                                this.buttons.pause.show();
-                                break;
-                        }
-                    }
-                } else {this.disable();} // The MPRIS player is no longer active
-                break;
-            case widgetState.DISABLED:
-                // If isRunning then push the widget to the panel, else try reconnecting for problimatic players (vlc)
-                if (this._isRunning) {this.enable(); this._update();}
-                break;
-
-        }
-    }
 
     // Returns a button object, which has been childed under container
     _createContainerButton(iconName, container) {
