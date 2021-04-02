@@ -194,7 +194,7 @@ class MPRISWidget extends DBusProxy{
         let labelText = this.busInterface.split(".")[3];
         // Capitalize text
         this.labelText = labelText[0].toUpperCase() + labelText.slice(1);
-        this.label = new St.Label({text: this.labelText,
+        this.label = new St.Label({style_class: 'panel-button', text: this.labelText,
                                    x_expand: true, x_align: Clutter.ActorAlign.CENTER,
                                    y_expand: true, y_align: Clutter.ActorAlign.CENTER});
         this.buttonContainer.insert_child_at_index(this.label, 0);
@@ -203,6 +203,7 @@ class MPRISWidget extends DBusProxy{
         // Animation constants
         this.animTime = 220;
         this.waitTime = 200;
+	this._animate = (typeof Clutter.BehaviourScale === 'function') ? this._bind(this._animate_bscale) : this._bind(this._animate_ease); 
     }
 
 
@@ -262,7 +263,7 @@ class MPRISWidget extends DBusProxy{
 
 
     // Animates a label to inform user that mpris object has changed
-    _animate_legacy() {
+    _animate_bscale() {
         // Store previous widget state then lock widget with an ANIMATING state
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
@@ -306,7 +307,7 @@ class MPRISWidget extends DBusProxy{
         }));
     }
 
-    _animate() {
+    _animate_ease() {
         // Store previous widget state then lock widget with an ANIMATING state
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
@@ -314,18 +315,41 @@ class MPRISWidget extends DBusProxy{
         // Hide all buttons, animate label into view
         for(let b in this.buttons) {this.buttons[b].hide();}
         this.label.show();
-        this.label.ease({
-            scale_x: 0,
-            scale_y: 1,
-            duration: this.animTime,
-            mode: Clutter.AnimationMode.EASE_OUT_ELASTIC,
-            onComplete: () => {
-                log("finished animation");
-                this.state = tempState; 
-            },
+        this.label.set_scale(1, 0);
+        this.label.ease({scale_y: 1, duration: this.animTime * 2, mode: Clutter.AnimationMode.EASE_OUT_ELASTIC,
+            onComplete: this._bind(() => {
+                GLib.timeout_add(0, this.waitTime, this._bind(() => {
+                    this.label.set_scale(1, 1);
+                    this.label.ease({scale_y: 0, duration: this.animTime, mode: Clutter.AnimationMode.EASE_IN_ELASTIC,
+                        onComplete: this._bind(() => {
+                            this.label.hide();
+                            GLib.timeout_add(0, this.waitTime, this._bind(() => {
+                                // Unhide correct buttons based on this.playbackStatus
+                                for(let b in this.buttons) {this.buttons[b].show();} 
+                                if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
+                                if(this.playbackStatus == "Playing") {this.buttons.start.hide();} 
+                                let buttons = Object.values(this.buttons);
+                                for (let i = buttons.length - 1; i >= 0; i--) {
+                                    buttons[i].set_scale(1, 0);
+                                    buttons[i].ease({scale_y: 1, duration: this.animTime, mode: Clutter.AnimationMode.EASE_OUT_ELASTIC,
+                                        onComplete: this._bind(() => {
+                                            buttons[i].set_scale(1,1);
+                                            if (i == 0) {
+                                                this.state = tempState;
+                                                this._update();
+                                            }
+                                        })
+                                    });
+                                }
+                            }));
+                        })
+                    });
+                }));
+            })
         });
- 
     }
+
+
 
     // Modifies widget behavior based on MPRIS player's state
     _update() {
@@ -364,7 +388,7 @@ class MPRISWidget extends DBusProxy{
 
     // Returns a button object, which has been childed under container
     _createContainerButton(iconName, container) {
-        let button = new St.Bin({ reactive: true, can_focus: true, track_hover: true});
+        let button = new St.Bin({ style_class: 'panel-button', reactive: true, can_focus: true, track_hover: true});
         button.set_child(new St.Icon({icon_name: iconName, style_class: 'system-status-icon'}));
         container.insert_child_at_index(button, 0);
         return button;
