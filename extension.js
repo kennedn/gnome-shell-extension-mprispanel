@@ -284,12 +284,15 @@ class MPRISWidget extends DBusProxy{
                                 break;
                         }
                     }
+                    this.buttons.forward.opacity = (this.proxy.CanGoNext) ? 255 : 64;
+                    this.buttons.backward.opacity = (this.proxy.CanGoPrevious) ? 255 : 64;
                 } else {this.disable();} // The MPRIS player is no longer active
                 break;
             case widgetState.DISABLED:
                 // Enable player and perform initial animations
                 if (this._isRunning) {
                     this.enable();
+                    this._update();
                     this._animate();
                 } else {
                     // If _update callback is firing but _isRunning is false then DBus connection is in a partial state (VLC)
@@ -325,8 +328,10 @@ class MPRISWidget extends DBusProxy{
                     GLib.timeout_add(0, this.waitTime, this._bind(() => {
                         // Unhide correct buttons based on this.playbackStatus
                         for(let b in this.buttons) {this.buttons[b].show();} 
-                        if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
                         if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
+                        else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
+                        this.buttons.forward.opacity = (this.proxy.CanGoNext) ? 255 : 64;
+                        this.buttons.backward.opacity = (this.proxy.CanGoPrevious) ? 255 : 64;
                         // Animate all buttons into view (hidden buttons wont show)
                         let endAnims = [];
                         for(let b in this.buttons) {
@@ -364,8 +369,10 @@ class MPRISWidget extends DBusProxy{
                             GLib.timeout_add(0, this.waitTime, this._bind(() => {
                                 // Unhide correct buttons based on this.playbackStatus
                                 for(let b in this.buttons) {this.buttons[b].show();} 
-                                if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
-                                if(this.playbackStatus == "Playing") {this.buttons.start.hide();} 
+                                if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
+                                else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
+                                this.buttons.forward.opacity = (this.proxy.CanGoNext) ? 255 : 64;
+                                this.buttons.backward.opacity = (this.proxy.CanGoPrevious) ? 255 : 64;
                                 let buttons = Object.values(this.buttons);
                                 for (let i = buttons.length - 1; i >= 0; i--) {
                                     buttons[i].set_scale(1, 0);
