@@ -43,10 +43,14 @@ class DBusProxy {
         catch (e) {logError(e);}
     }
 
-    // Disconnect all stored connections
-    remove() {
-        this.connections.forEach(c => c.object.disconnect(c.handler));
-        this.connections = [];
+    // Disconnect stored connection, with optional type param to disconnect a subset of connections
+    remove(type=null) {
+        this.connections.forEach((conn, idx, obj) => {
+            if (type === null || conn.type === type) {
+                conn.object.disconnect(conn.handler);
+                obj.splice(idx, 1);
+            }
+        });
     }
 
     // Convenience function to shorten binds
@@ -54,9 +58,9 @@ class DBusProxy {
         return Lang.bind(this, func);
     }
 
-    // Obj.connect wrapper that stores handler and object for later disconnect
-    _storeConnection(object, property, callback) {
-        this.connections.push({"object": object, "handler": object.connect(property, callback)});
+    // Obj.connect wrapper that stores type, handler and object for later disconnect
+    _storeConnection(type, object, property, callback) {
+        this.connections.push({"type": type, "object": object, "handler": object.connect(property, callback)});
     }
 }
 
@@ -93,8 +97,8 @@ class MPRISController extends DBusProxy {
         this.detectedInterfaces = "";
         this.enabledInterfaces = [];
         this.whitelist = false;
-        this._storeConnection(this.settings, 'changed::enabled-interfaces', this._bind(this._parseSettings));
-        this._storeConnection(this.settings, 'changed::whitelist', this._bind(this._parseSettings));
+        this._storeConnection('gsetting', this.settings, 'changed::enabled-interfaces', this._bind(this._parseSettings));
+        this._storeConnection('gsetting', this.settings, 'changed::whitelist', this._bind(this._parseSettings));
         this._parseSettings();
     }
 
@@ -213,14 +217,16 @@ class MPRISWidget extends DBusProxy{
 
     // Attempts to establish a connection to MPRIS interface and connect buttons and callbacks up
     connect(update=true) {
+        // Remove any previous dbus connections
+        super.remove('dbus');
         // Connect this.proxy to MPRIS interface
         super.connect();
         // Attach callbacks for each button and to watch for property changes on the mpris interface
-        this._storeConnection(this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
-        this._storeConnection(this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
-        this._storeConnection(this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
-        this._storeConnection(this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
-        this._storeConnection(this.proxy, 'g-properties-changed', this._bind(this._update));
+        this._storeConnection('dbus', this.buttons.start, 'button-press-event', this._bind(() => this.proxy.PlayRemote()));
+        this._storeConnection('dbus', this.buttons.pause, 'button-press-event', this._bind(() => this.proxy.PauseRemote()));
+        this._storeConnection('dbus', this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
+        this._storeConnection('dbus', this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
+        this._storeConnection('dbus', this.proxy, 'g-properties-changed', this._bind(this._update));
 
         // Call update once in case MPRIS player is already open.
         if (update) {this._update();}
@@ -306,6 +312,8 @@ class MPRISWidget extends DBusProxy{
 
     // Animates MPRIS player changing, uses BehaviourScale to drive animation
     _animate_bscale() {
+        //Remove any previous animation connections
+        super.remove('animation');
         // Store current state to restore later and switch to ANIMATING
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
@@ -316,13 +324,13 @@ class MPRISWidget extends DBusProxy{
         labelInAnim.start(); 
 
         // Wait for label to finish animating
-        this._storeConnection(labelInAnim, 'completed', this._bind(t => {
+        this._storeConnection('animation', labelInAnim, 'completed', this._bind(t => {
             // Hold position for this.waitTime ms
             GLib.timeout_add(0, this.waitTime, this._bind(() => {
                 // Animate label out of view
                 let labelOutAnim = this._behaviourScale(this.label, this.animTime, Clutter.AnimationMode.EASE_IN_ELASTIC, 1, 1, 1, 0);
                 labelOutAnim.start();
-                this._storeConnection(labelOutAnim, 'completed', this._bind(t => {
+                this._storeConnection('animation', labelOutAnim, 'completed', this._bind(t => {
                     // Once label is out of view, hide label and hold position
                     this.label.hide();
                     GLib.timeout_add(0, this.waitTime, this._bind(() => {
@@ -339,7 +347,7 @@ class MPRISWidget extends DBusProxy{
                             endAnims[endAnims.length - 1].start();
                         }
                         // Once button animations are through, unlock widget by setting state to previous value
-                        this._storeConnection(endAnims[0], 'completed', this._bind(t => {
+                        this._storeConnection('animation', endAnims[0], 'completed', this._bind(t => {
                             this.state = tempState; 
                             for(let b in this.buttons) {this.buttons[b].set_scale(1, 1);} 
                             this._update();
