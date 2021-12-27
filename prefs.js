@@ -25,7 +25,10 @@ function buildPrefsWidget() {
 
     // Create parent widget
     let prefsWidget = new Gtk.Grid({
-        margin: 18,
+        margin_start: 18,
+        margin_end: 18,
+        margin_top: 18,
+        margin_bottom: 18,
         column_spacing: 18,
         row_spacing: 18,
         visible: true,
@@ -116,7 +119,15 @@ function buildPrefsWidget() {
     );
 
     // Resize the window to minimum dimensions on creation
-    prefsWidget.connect('realize', () => prefsWidget.get_toplevel().resize(1, 1));
+    prefsWidget.connect('realize', () => {
+	if (typeof prefsWidget.get_root === 'function') {
+        let window = prefsWidget.get_root();
+        window.default_width = 1;
+        window.default_height = 1;
+	} else {
+        prefsWidget.get_toplevel().resize(1, 1);
+	}
+    });
 
     // Return our widget which will be added to the window
     return prefsWidget;
