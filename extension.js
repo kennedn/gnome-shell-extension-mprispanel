@@ -4,7 +4,7 @@ const St = imports.gi.St;
 const Main = imports.ui.main;
 const Gio = imports.gi.Gio;
 const GLib = imports.gi.GLib;
-const Lang = imports.lang;
+const PointerWatcher = imports.ui.pointerWatcher.getPointerWatcher();
 const Clutter = imports.gi.Clutter;
 const ExtensionUtils = imports.misc.extensionUtils;
 const Me = ExtensionUtils.getCurrentExtension();
@@ -55,7 +55,7 @@ class DBusProxy {
 
     // Convenience function to shorten binds
     _bind(func) {
-        return Lang.bind(this, func);
+        return func.bind(this);
     }
 
     // Obj.connect wrapper that stores type, handler and object for later disconnect
@@ -201,17 +201,28 @@ class MPRISWidget extends DBusProxy{
         this.label = new St.Label({style_class: 'panel-button', text: this.labelText,
                                    x_expand: true, x_align: Clutter.ActorAlign.CENTER,
                                    y_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        this.mouseLabel = new St.Label({style_class: 'dash-label', text: this.labelText,
+                                        x_expand: true, x_align: Clutter.ActorAlign.CENTER,
+                                        y_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        Main.layoutManager.addChrome(this.mouseLabel);
+
         this.buttonContainer.insert_child_at_index(this.label, 0);
         this.label.hide();
+
+        this.mouseLabel.hide();
 
         // Animation constants
         this.startTime = 380;
         this.animTime = 100;
         this.waitTime = 150;
+        this.mouseOverTime = 1600;
+        this.mouseOverID = -1;
+        this.mouseListener = null;
         // Older versions of gnome must rely on behaviour scaling for animations, newer versions can use easing
         this._animate = (typeof Clutter.BehaviourScale === 'function') ? 
-                         this._bind(this._animate_bscale) : 
-                         this._bind(this._animate_ease); 
+                         this._bind(this._animateBscale) : 
+                         this._bind(this._animateEase); 
+
     }
 
 
@@ -227,9 +238,54 @@ class MPRISWidget extends DBusProxy{
         this._storeConnection('dbus', this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
         this._storeConnection('dbus', this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
         this._storeConnection('dbus', this.proxy, 'g-properties-changed', this._bind(this._update));
+        this._storeConnection('mouse', this.buttonContainer, 'enter-event', this._bind(this._onEnter));
 
         // Call update once in case MPRIS player is already open.
         if (update) {this._update();}
+    }
+
+    _onEnter() {
+        if (this.mouseOverID >= 0 || this.mouseListener) {return;} // Label is currently displaying
+        log("_old_enter fired")
+        this.mouseOverID = GLib.timeout_add(0, this.mouseOverTime, this._bind(() => { 
+            this.mouseOverID = -1;
+            if (!this._onMotion()) {return;}
+            this.mouseListener = PointerWatcher.addWatch(20, this._bind(this._onMotion));
+            this.mouseLabel.show();
+        }));
+    }   
+
+    _onLeave() {
+        this.mouseLabel.hide();
+        log("mouseListener: " + this.mouseListener);
+        if (this.mouseListener) {
+            PointerWatcher._removeWatch(this.mouseListener);
+            log("removed watch")
+            this.mouseListener = null;
+        }
+        log("mouseListener: " + this.mouseListener);
+        if (this.mouseOverID >= 0) { 
+            GLib.Source.remove(this.mouseOverID); 
+            this.mouseOverID = -1;
+        }
+    }
+
+    _onMotion() {
+        // Trigger leave event if mouse no longer in bounds of buttonContainer
+        if (!this.buttonContainer.get_hover()) {
+            this._onLeave();
+            return false;
+        }
+
+        let [mouseX, mouseY, _] = global.get_pointer();
+
+        let yOffset = this.mouseLabel.get_height() * 0.7;
+        let xOffset = this.mouseLabel.get_width() * 0.1;
+        let y = mouseY + yOffset;
+        let x = mouseX + xOffset;
+
+        this.mouseLabel.set_position(x, y);
+        return true;
     }
 
     // Insert container onto panel
@@ -261,8 +317,34 @@ class MPRISWidget extends DBusProxy{
         if (this.buttonContainer in Main.panel._rightBox.get_children()) {
             Main.panel._rightBox.remove_child(this.buttonContainer);
         }
+        Main.layoutManager.removeChrome(this.mouseLabel);
         // Destroy children and container
         this.buttonContainer.destroy();
+    }
+
+    _updateButtonsState(playbackStatus) {
+        if(playbackStatus) {
+            log("playbackStatus:" + playbackStatus);
+            // Callback fires multiple times so check if PlaybackStatus is different from last time we fired.
+            if(this.playbackStatus == playbackStatus) {return;}
+            this.playbackStatus = playbackStatus;
+        } 
+
+        for(let b in this.buttons) {this.buttons[b].show();} 
+        if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
+        else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
+
+        if (this.proxy.CanGoNext) {
+            this.buttons.forward.opacity = 255;
+        } else {
+            this.buttons.forward.opacity = 64;
+        }
+
+        if (this.proxy.CanGoPrevious) {
+            this.buttons.backward.opacity = 255;
+        } else {
+            this.buttons.backward.opacity = 64;
+        }
     }
 
     // Modifies widget behavior based on MPRIS player's state
@@ -272,26 +354,7 @@ class MPRISWidget extends DBusProxy{
                 // Restore widget to left most index in rightBox if container has moved
                 if (Main.panel._rightBox.get_children()[0] != this.buttonContainer) {this.disable(); this.enable();}
                 if (this._isRunning) {
-                    // Callback fires multiple times so check if PlaybackStatus is different from last time we fired.
-                    let playbackStatus = this.proxy.PlaybackStatus;
-                    if(this.playbackStatus != playbackStatus) {
-                        // Swap Pause and Play buttons out from hiding based on playbackState
-                        switch(playbackStatus) {
-                            case "Paused":
-                            case "Stopped":
-                                this.playbackStatus = playbackStatus;
-                                this.buttons.pause.hide();
-                                this.buttons.start.show();
-                                break;
-                            case "Playing":
-                                this.playbackStatus = playbackStatus;
-                                this.buttons.start.hide();  
-                                this.buttons.pause.show();
-                                break;
-                        }
-                    }
-                    this.buttons.forward.opacity = (this.proxy.CanGoNext) ? 255 : 64;
-                    this.buttons.backward.opacity = (this.proxy.CanGoPrevious) ? 255 : 64;
+                    this._updateButtonsState(this.proxy.PlaybackStatus); 
                 } else {this.disable();} // The MPRIS player is no longer active
                 break;
             case widgetState.DISABLED:
@@ -311,7 +374,7 @@ class MPRISWidget extends DBusProxy{
 
 
     // Animates MPRIS player changing, uses BehaviourScale to drive animation
-    _animate_bscale() {
+    _animateBscale() {
         //Remove any previous animation connections
         super.remove('animation');
         // Store current state to restore later and switch to ANIMATING
@@ -334,12 +397,8 @@ class MPRISWidget extends DBusProxy{
                     // Once label is out of view, hide label and hold position
                     this.label.hide();
                     GLib.timeout_add(0, this.waitTime, this._bind(() => {
-                        // Unhide correct buttons based on this.playbackStatus
-                        for(let b in this.buttons) {this.buttons[b].show();} 
-                        if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
-                        else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
-                        this.buttons.forward.opacity = (this.proxy.CanGoNext) ? 255 : 64;
-                        this.buttons.backward.opacity = (this.proxy.CanGoPrevious) ? 255 : 64;
+                        // Ensure buttons are in correct state before displaying
+                        this._updateButtonsState();
                         // Animate all buttons into view (hidden buttons wont show)
                         let endAnims = [];
                         for(let b in this.buttons) {
@@ -359,7 +418,7 @@ class MPRISWidget extends DBusProxy{
     }
 
     // Animates MPRIS player changing, uses Obj.ease to drive animation
-    _animate_ease() {
+    _animateEase() {
         // Store current state to restore later and switch to ANIMATING
         let tempState = this.state;
         this.state = widgetState.ANIMATING;
@@ -375,12 +434,8 @@ class MPRISWidget extends DBusProxy{
                         onComplete: this._bind(() => {
                             this.label.hide();
                             GLib.timeout_add(0, this.waitTime, this._bind(() => {
-                                // Unhide correct buttons based on this.playbackStatus
-                                for(let b in this.buttons) {this.buttons[b].show();} 
-                                if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
-                                else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
-                                this.buttons.forward.opacity = (this.proxy.CanGoNext) ? 255 : 64;
-                                this.buttons.backward.opacity = (this.proxy.CanGoPrevious) ? 255 : 64;
+                                // Ensure buttons are in correct state before displaying
+                                this._updateButtonsState();
                                 let buttons = Object.values(this.buttons);
                                 for (let i = buttons.length - 1; i >= 0; i--) {
                                     buttons[i].set_scale(1, 0);
