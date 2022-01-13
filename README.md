@@ -1,6 +1,6 @@
 # gnome-shell-extension-mprispanel
 
-Adds controls to the gnome panel for MPRIS enabled media players
+Add controls to the gnome panel for any MPRIS enabled media player.
 
 Uses DBus to interact with all available media players. A 'smart-switching' technique is leveraged to decide which player to control.
 
