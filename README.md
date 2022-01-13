@@ -7,7 +7,7 @@ Uses DBus to interact with all available media players. A 'smart-switching' tech
 <img src="images/mprispanel.gif" width="600"/>
 
 ## Preferences
-<img src="images/gsettings.gif" width="400"/>
+<img src="images/gsettings.png" width="400"/>
 
 | Field              | Description                                           |
 |--------------------|-------------------------------------------------------|
