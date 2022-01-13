@@ -80,6 +80,7 @@ class MPRISController extends DBusProxy {
         this.widget = null;
         this.mprisIntrospect = mprisIntrospect;
         this.widgetBusInterface = null;
+        this.mouseHover = false;
         this.state = widgetState.DISABLED;
 
         // Create a SchemaSource object so that we can search for our extensions schema
@@ -99,6 +100,7 @@ class MPRISController extends DBusProxy {
         this.whitelist = false;
         this._storeConnection('gsetting', this.settings, 'changed::enabled-interfaces', this._bind(this._parseSettings));
         this._storeConnection('gsetting', this.settings, 'changed::whitelist', this._bind(this._parseSettings));
+        this._storeConnection('gsetting', this.settings, 'changed::mouse-hover', this._bind(this._parseSettings));
         this._parseSettings();
     }
 
@@ -106,8 +108,11 @@ class MPRISController extends DBusProxy {
     _parseSettings() {
         // Parse comma seperated gsettings string into an array of enabledInterfaces
         this.enabledInterfaces = this.settings.get_string('enabled-interfaces').split(',');
-        // Get whitelist boolean from gsettings
+        // Controls behaviour of _mprisInterface
         this.whitelist = this.settings.get_boolean('whitelist');
+        // Controls whether tooltip displays on widget hover
+        this.mouseHover = this.settings.get_boolean('mouse-hover');
+
         // Set widgetBusInterface back to null to prompt _monitor() to recreate widget
         this.widgetBusInterface = null;
     }
@@ -143,10 +148,14 @@ class MPRISController extends DBusProxy {
                     // Only bother to remove if the object exists
                     if (this.widget !== null) {this.widget.remove();}
                     // Create a new widget with nextInterface and connect its signals up
-                    this.widget = new MPRISWidget(this.mprisIntrospect, this.widgetBusInterface, "/org/mpris/MediaPlayer2");
-                    this.widget.connect();
+                    // mpv-mpris can and will freeze the display if dbus-connections are connected too soon
+                    let timeout = (this.widgetBusInterface.split(".")[3] == 'mpv') ? 1000 : 0;
+                    GLib.timeout_add(0, timeout, this._bind(() => {
+                        this.widget = new MPRISWidget(this.mprisIntrospect, this.widgetBusInterface, "/org/mpris/MediaPlayer2", this.mouseHover);
+                        this.widget.connect(true);
+                    }));
                 }
-                // Run monitor again in 100ms
+                // Run monitor on loop
                 GLib.timeout_add(0, 100, this._bind(this._monitor));
                 break;
         }
@@ -175,8 +184,10 @@ class MPRISController extends DBusProxy {
 
 // Defines a widget that exposes MPRIS controls as buttons on the gnome panel
 class MPRISWidget extends DBusProxy{
-    constructor(introspect, busInterface, busPath) {
+    constructor(introspect, busInterface, busPath, mouseHover) {
         super(introspect, busInterface, busPath);
+        this.mouseHover = mouseHover;
+
         this.playbackStatus = "Paused";
         this.state = widgetState.DISABLED;
 
@@ -201,23 +212,22 @@ class MPRISWidget extends DBusProxy{
         this.label = new St.Label({style_class: 'panel-button', text: this.labelText,
                                    x_expand: true, x_align: Clutter.ActorAlign.CENTER,
                                    y_expand: true, y_align: Clutter.ActorAlign.CENTER});
-        this.mouseLabel = new St.Label({style_class: 'dash-label', text: this.labelText,
-                                        x_expand: true, x_align: Clutter.ActorAlign.CENTER,
-                                        y_expand: true, y_align: Clutter.ActorAlign.CENTER});
+        this.mouseLabel = new St.Label({style_class: 'dash-label', text: this.labelText});
         Main.layoutManager.addChrome(this.mouseLabel);
-
         this.buttonContainer.insert_child_at_index(this.label, 0);
         this.label.hide();
-
         this.mouseLabel.hide();
+        this.mouseOverID = -1;
+        this.mouseListener = null;
+        this.transformOffset = null;
+
 
         // Animation constants
         this.startTime = 380;
         this.animTime = 100;
         this.waitTime = 150;
         this.mouseOverTime = 1600;
-        this.mouseOverID = -1;
-        this.mouseListener = null;
+        this.display = (typeof(global.screen) === 'undefined') ? global.display : global.screen;
         // Older versions of gnome must rely on behaviour scaling for animations, newer versions can use easing
         this._animate = (typeof Clutter.BehaviourScale === 'function') ? 
                          this._bind(this._animateBscale) : 
@@ -238,32 +248,28 @@ class MPRISWidget extends DBusProxy{
         this._storeConnection('dbus', this.buttons.forward, 'button-press-event', this._bind(() => this.proxy.NextRemote()));
         this._storeConnection('dbus', this.buttons.backward, 'button-press-event', this._bind(() => this.proxy.PreviousRemote()));
         this._storeConnection('dbus', this.proxy, 'g-properties-changed', this._bind(this._update));
-        this._storeConnection('mouse', this.buttonContainer, 'enter-event', this._bind(this._onEnter));
+        if (this.mouseHover) { this._storeConnection('mouse', this.buttonContainer, 'enter-event', this._bind(this._onEnter)); }
 
         // Call update once in case MPRIS player is already open.
         if (update) {this._update();}
     }
 
     _onEnter() {
-        if (this.mouseOverID >= 0 || this.mouseListener) {return;} // Label is currently displaying
-        log("_old_enter fired")
+        if (this.mouseOverID >= 0 || this.mouseListener) { return; } // Label is currently displaying
+        if (!this._onMotion()) { return; }
+        this.mouseListener = PointerWatcher.addWatch(15, this._bind(this._onMotion));
         this.mouseOverID = GLib.timeout_add(0, this.mouseOverTime, this._bind(() => { 
             this.mouseOverID = -1;
-            if (!this._onMotion()) {return;}
-            this.mouseListener = PointerWatcher.addWatch(20, this._bind(this._onMotion));
             this.mouseLabel.show();
         }));
     }   
 
     _onLeave() {
         this.mouseLabel.hide();
-        log("mouseListener: " + this.mouseListener);
         if (this.mouseListener) {
             PointerWatcher._removeWatch(this.mouseListener);
-            log("removed watch")
             this.mouseListener = null;
         }
-        log("mouseListener: " + this.mouseListener);
         if (this.mouseOverID >= 0) { 
             GLib.Source.remove(this.mouseOverID); 
             this.mouseOverID = -1;
@@ -272,20 +278,52 @@ class MPRISWidget extends DBusProxy{
 
     _onMotion() {
         // Trigger leave event if mouse no longer in bounds of buttonContainer
-        if (!this.buttonContainer.get_hover()) {
+        let onLeave = () => {
+            this.transformOffset = null;
             this._onLeave();
             return false;
+        };
+
+        if (!this.buttonContainer.get_hover()) { onLeave(); }
+
+        let [mouseX, mouseY] = global.get_pointer();
+        let currentMonitor = this.display.get_monitor_geometry(this.display.get_current_monitor())
+        let labelHeight = this.mouseLabel.get_height();
+        let labelWidth = this.mouseLabel.get_width();
+
+        // If offsets have already been calculated, just apply them
+        if (this.transformOffset) {
+            let mouseXOffset = this.transformOffset[0];
+            let mouseXOrigin = (mouseX  - labelWidth * 0.5);
+            let mouseYOffset = this.transformOffset[1];
+            let mouseYOrigin = mouseY - labelHeight * 0.25;
+            this.mouseLabel.set_position(mouseXOrigin + mouseXOffset, mouseYOrigin + mouseYOffset);
+            return true;
         }
 
-        let [mouseX, mouseY, _] = global.get_pointer();
+        // Modifiers to try displaying label in bottom-right, top-right, top-left, bottom-left respectively;
+        let transforms = [[1, 1],[1, -1], [-1, 1], [-1, -1]];
+        let transform = transforms[Math.floor(Math.random() * transforms.length)];
 
-        let yOffset = this.mouseLabel.get_height() * 0.7;
-        let xOffset = this.mouseLabel.get_width() * 0.1;
-        let y = mouseY + yOffset;
-        let x = mouseX + xOffset;
+        // Attempt to calculate an offset that is in bounds on current monitor
+        for (let transform of transforms) {
+            let mouseXOffset = labelWidth * transform[0] * 0.6;
+            let mouseXOrigin = (mouseX  - labelWidth * 0.5);
+            let relativeX = mouseXOrigin + mouseXOffset - currentMonitor.x;
 
-        this.mouseLabel.set_position(x, y);
-        return true;
+            let mouseYOffset = labelHeight * transform[1] * 0.9;
+            let mouseYOrigin = mouseY - labelHeight * 0.25;
+            let relativeY = mouseYOrigin + mouseYOffset - currentMonitor.y;
+
+            // If label within bounds of current monitor
+            if ((relativeX > 0 && relativeX + labelWidth < currentMonitor.width) && (relativeY > 0 && relativeY + labelHeight < currentMonitor.height)) {
+                this.transformOffset = [mouseXOffset, mouseYOffset]; // Store in-bounds transform offsets until onLeave called so we don't keep iterating over all possibilities
+                this.mouseLabel.set_position(mouseXOrigin + mouseXOffset, mouseYOrigin + mouseYOffset);
+                return true;
+            }
+        }
+
+        onLeave(); // Something went wrong because none of the modifiers were in bounds, stop displaying label
     }
 
     // Insert container onto panel
@@ -322,9 +360,17 @@ class MPRISWidget extends DBusProxy{
         this.buttonContainer.destroy();
     }
 
+    _setButtonState(button, condition) {
+        if(condition) {
+            button.opacity = 255;
+            button.set_reactive(true);    
+        } else {
+            button.opacity = 64;
+            button.set_reactive(false);    
+        }
+    }
     _updateButtonsState(playbackStatus) {
         if(playbackStatus) {
-            log("playbackStatus:" + playbackStatus);
             // Callback fires multiple times so check if PlaybackStatus is different from last time we fired.
             if(this.playbackStatus == playbackStatus) {return;}
             this.playbackStatus = playbackStatus;
@@ -334,16 +380,12 @@ class MPRISWidget extends DBusProxy{
         if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
         else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
 
-        if (this.proxy.CanGoNext) {
-            this.buttons.forward.opacity = 255;
-        } else {
-            this.buttons.forward.opacity = 64;
-        }
-
-        if (this.proxy.CanGoPrevious) {
-            this.buttons.backward.opacity = 255;
-        } else {
-            this.buttons.backward.opacity = 64;
+        this._setButtonState(this.buttons.forward, this.proxy.CanGoNext);
+        this._setButtonState(this.buttons.backward, this.proxy.CanGoPrevious);
+        for(let b of Object.values(this.buttons)) {
+            if (b.is_visible) {
+                this._setButtonState(b, this.playbackStatus != 'Stopped');
+            }
         }
     }
 

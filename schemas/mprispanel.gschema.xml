@@ -12,5 +12,8 @@
     <key name="whitelist" type="b">
       <default>false</default>
     </key>
+    <key name="mouse-hover" type="b">
+      <default>true</default>
+    </key>
   </schema>
 </schemalist>

@@ -36,8 +36,9 @@ function buildPrefsWidget() {
 
     // enabled-interfaces label
     let detectedLabel = new Gtk.Label({
-        label: 'Detected players:',
+        label: 'Detected players',
         halign: Gtk.Align.START,
+        tooltip_text: "A list of all currently running MPRIS players, entries listed here can be used in 'Preferred players'",
         visible: true
     });
     prefsWidget.attach(detectedLabel, 0, 0, 1, 1);
@@ -63,10 +64,10 @@ function buildPrefsWidget() {
 
     // enabled-interfaces label
     let interfaceLabel = new Gtk.Label({
-        label: 'Preferred players:',
+        label: 'Preferred players',
         halign: Gtk.Align.START,
         visible: true,
-        tooltip_text: "A comma seperated list of media players, first available player will be selected from left to right"
+        tooltip_text: "For when more than one player is running.\nA comma seperated list of MPRIS players, the first MPRIS player will be selected from left to right"
     });
 
     prefsWidget.attach(interfaceLabel, 0, 1, 1, 1);
@@ -95,38 +96,64 @@ function buildPrefsWidget() {
     }); 
 
     // Create a label & switch for `whitelist`
-    let toggleLabel = new Gtk.Label({
-        label: 'Whitelist:',
+    let whitelistLabel = new Gtk.Label({
+        label: 'Ignore remainder',
         halign: Gtk.Align.START,
         visible: true,
-        tooltip_text: "Make 'Preferred players' act like a whitelist, ignoring any remaining players"
+        tooltip_text: "Ignore MPRIS players not explicitly specified in 'Preferred players'"
     });
-    prefsWidget.attach(toggleLabel, 0, 2, 1, 1);
+    prefsWidget.attach(whitelistLabel, 0, 2, 1, 1);
 
-    let toggle = new Gtk.Switch({
+    let whitelistToggle = new Gtk.Switch({
         active: this.settings.get_boolean('whitelist'),
         halign: Gtk.Align.START,
         visible: true
     });
-    prefsWidget.attach(toggle, 1, 2, 1, 1);
+    prefsWidget.attach(whitelistToggle, 1, 2, 1, 1);
 
     // Bind the switch to the `whitelist` key
     this.settings.bind(
         'whitelist',
-        toggle,
+        whitelistToggle,
         'active',
         Gio.SettingsBindFlags.DEFAULT
     );
 
+
+    // Create a label & switch for `whitelist`
+    let hoverLabel = new Gtk.Label({
+        label: 'Tooltip',
+        halign: Gtk.Align.START,
+        visible: true,
+        tooltip_text: "Display current MPRIS player on widget hover"
+    });
+    prefsWidget.attach(hoverLabel, 0, 3, 1, 1);
+
+    let hoverToggle = new Gtk.Switch({
+        active: this.settings.get_boolean('mouse-hover'),
+        halign: Gtk.Align.START,
+        visible: true
+    });
+    prefsWidget.attach(hoverToggle, 1, 3, 1, 1);
+
+    // Bind the switch to the `hover` key
+    this.settings.bind(
+        'mouse-hover',
+        hoverToggle,
+        'active',
+        Gio.SettingsBindFlags.DEFAULT
+    );
+    
+
     // Resize the window to minimum dimensions on creation
     prefsWidget.connect('realize', () => {
-	if (typeof prefsWidget.get_root === 'function') {
-        let window = prefsWidget.get_root();
-        window.default_width = 1;
-        window.default_height = 1;
-	} else {
-        prefsWidget.get_toplevel().resize(1, 1);
-	}
+        if (typeof prefsWidget.get_root === 'function') {
+            let window = prefsWidget.get_root();
+            window.default_width = 1;
+            window.default_height = 1;
+        } else {
+            prefsWidget.get_toplevel().resize(1, 1);
+        }
     });
 
     // Return our widget which will be added to the window
