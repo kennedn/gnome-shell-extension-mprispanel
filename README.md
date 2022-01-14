@@ -1,6 +1,6 @@
 # gnome-shell-extension-mprispanel
 
-Adds controls to the gnome panel for MPRIS enabled media players
+Add controls to the gnome panel for any MPRIS enabled media player.
 
 Uses DBus to interact with all available media players. A 'smart-switching' technique is leveraged to decide which player to control.
 
@@ -18,9 +18,9 @@ Uses DBus to interact with all available media players. A 'smart-switching' tech
 
 ## Detailed Description
 
-**mprispanel** works by polling DBus on a timer for currently running applications with an exposed MPRIS interfaces. Therefor it is application agnostic and will detect any application that exposes such an interface.
+**mprispanel** works by polling DBus on a timer for currently running applications with an exposed MPRIS interface. Therefor it is application agnostic and will detect any application that exposes such an interface.
 
-In situations where there is more than one running application with an MPRIS interface, the 'Preferred players' option can be utilised to make a priority call on which player to select.
+In situations where there is more than one running application with an MPRIS interface, the 'Preferred players' option will be utilised to make a priority call on which player to select.
 
 Users can specify a comma seperated list of 'Preferred players' to control. **mprispanel** will select the first available player it can find from left to right. After it has exhausted the 'Preferred players' list, it will then select from any remaining players unless 'Ignore remaining' is set.
 
