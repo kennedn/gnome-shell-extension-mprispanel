@@ -257,7 +257,7 @@ class MPRISWidget extends DBusProxy{
     _onEnter() {
         if (this.mouseOverID >= 0 || this.mouseListener) { return; } // Label is currently displaying
         if (!this._onMotion()) { return; }
-        this.mouseListener = PointerWatcher.addWatch(15, this._bind(this._onMotion));
+        this.mouseListener = PointerWatcher.addWatch(20, this._bind(this._onMotion));
         this.mouseOverID = GLib.timeout_add(0, this.mouseOverTime, this._bind(() => { 
             this.mouseOverID = -1;
             this.mouseLabel.show();
@@ -380,11 +380,17 @@ class MPRISWidget extends DBusProxy{
         if(this.playbackStatus == "Playing") {this.buttons.start.hide();}
         else if(this.playbackStatus == "Paused" || this.playbackStatus == "Stopped") {this.buttons.pause.hide();}
 
-        this._setButtonState(this.buttons.forward, this.proxy.CanGoNext);
-        this._setButtonState(this.buttons.backward, this.proxy.CanGoPrevious);
         for(let b of Object.values(this.buttons)) {
             if (b.is_visible) {
-                this._setButtonState(b, this.playbackStatus != 'Stopped');
+                if (this.buttons.forward == b) { 
+                  this._setButtonState(this.buttons.forward, (this.proxy.CanGoNext && this.playbackStatus != 'Stopped'));
+                  continue;
+                } else if (this.buttons.backward == b) { 
+                  this._setButtonState(this.buttons.backward, (this.proxy.CanGoPrevious && this.playbackStatus != 'Stopped'));
+                  continue;
+                } else {
+                  this._setButtonState(b, this.playbackStatus != 'Stopped');
+                }
             }
         }
     }
